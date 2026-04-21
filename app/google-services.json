@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "200306594591",
+    "project_id": "flixr-72f6d",
+    "storage_bucket": "flixr-72f6d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:200306594591:android:d9fd2fbfadb7218fbe962a",
+        "android_client_info": {
+          "package_name": "com.example.flixr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxEOdc5b6RdlTyVghQpG9sTeEY1Wqp3-8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

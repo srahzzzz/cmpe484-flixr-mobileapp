@@ -1,9 +1,5 @@
 # Flixr – Android Application Firebase Setup Guide
 
-This document provides a step-by-step guide for setting up the Flixr mobile application and integrating it with Firebase services. All team members should follow these instructions carefully to ensure consistency across development environments.
-
----
-
 ## 1. Cloning the Repository
 
 Clone the project repository and open it in Android Studio:

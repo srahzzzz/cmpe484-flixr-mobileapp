@@ -28,6 +28,7 @@ data class AuthUiState(
     // We keep the opening splash visible until we've completed the first auth/profile check.
     val isInitialized: Boolean = false,
     val errorMessage: String? = null,
+    val successMessage: String? = null,
 )
 
 class AuthViewModel(app: Application) : AndroidViewModel(app) {
@@ -47,6 +48,10 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() {
         _state.update { it.copy(errorMessage = null) }
+    }
+
+    fun clearSuccess() {
+        _state.update { it.copy(successMessage = null) }
     }
 
     /**
@@ -95,9 +100,13 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
     fun signUpEmail(username: String, email: String, password: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isBusy = true, errorMessage = null) }
+            _state.update { it.copy(isBusy = true, errorMessage = null, successMessage = null) }
             try {
                 repo.signUpEmail(username, email, password)
+                // Match expected UX: show success, then let user log in explicitly.
+                // Firebase auto-signs in after createUserWithEmailAndPassword, so we sign out.
+                repo.signOutEverywhere()
+                _state.update { it.copy(isBusy = false, successMessage = "User has been created! Go to login.") }
             } catch (e: UsernameTakenException) {
                 _state.update { it.copy(isBusy = false, errorMessage = e.message) }
             } catch (e: Exception) {

@@ -25,6 +25,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
@@ -33,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -62,7 +66,9 @@ import com.example.flixr.auth.AuthViewModel
 import com.example.flixr.ui.theme.FlixrGradientBottomLeft
 import com.example.flixr.ui.theme.FlixrGradientTopRight
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.min
+import android.util.Patterns
 
 /**
  * Root Compose entry point.
@@ -104,6 +110,7 @@ fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
                 AuthLandingScreen(
                     isBusy = state.isBusy,
                     errorMessage = state.errorMessage,
+                    successMessage = state.successMessage,
                     isGoogleConfigured = viewModel.isGoogleConfigured(),
                     onLoginEmail = viewModel::loginEmail,
                     onSignUpEmail = viewModel::signUpEmail,
@@ -111,6 +118,7 @@ fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
                         // Launch Google account picker. Firebase sign-in happens in the ViewModel after result.
                         googleLauncher.launch(viewModel.buildGoogleSignInIntent())
                     },
+                    onClearSuccess = viewModel::clearSuccess,
                 )
             }
 
@@ -175,13 +183,30 @@ private fun BrandedSplashScreen() {
 private fun AuthLandingScreen(
     isBusy: Boolean,
     errorMessage: String?,
+    successMessage: String?,
     isGoogleConfigured: Boolean,
     onLoginEmail: (email: String, password: String) -> Unit,
     onSignUpEmail: (username: String, email: String, password: String) -> Unit,
     onGoogleClick: () -> Unit,
+    onClearSuccess: () -> Unit,
 ) {
     // Local mini-navigation (keeps dependencies low for coursework).
     var screen by remember { mutableStateOf(LandingScreen.Welcome) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(successMessage) {
+        val msg = successMessage
+        if (!msg.isNullOrBlank()) {
+            // Ensure we actually show the green popup on screen.
+            screen = LandingScreen.Login
+            scope.launch {
+                snackbarHostState.showSnackbar(message = msg, withDismissAction = true)
+            }
+            onClearSuccess()
+        }
+    }
 
     val gradient =
         Brush.verticalGradient(
@@ -196,6 +221,18 @@ private fun AuthLandingScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
     ) {
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+            snackbar = { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = Color(0xFF2E7D32), // green
+                    contentColor = Color.White,
+                    actionColor = Color.White,
+                )
+            },
+        )
         val logoHeight = rememberLogoHeightDp(maxDp = 170f)
         when (screen) {
             LandingScreen.Welcome -> {
@@ -543,16 +580,24 @@ private fun SignupScreen(
     var password by remember { mutableStateOf("") }
 
     // Live validation (UI-level) so the button enables/disables immediately.
-    val usernameOk =
+    val normalizedUsername = com.example.flixr.auth.Username.normalize(username)
+    val usernameError: String? =
         runCatching {
-            com.example.flixr.auth.Username.validateOrThrow(
-                com.example.flixr.auth.Username.normalize(username)
-            )
-            true
-        }.getOrDefault(false)
-    val emailOk = email.trim().contains("@") && email.trim().contains(".")
+            com.example.flixr.auth.Username.validateOrThrow(normalizedUsername)
+            null
+        }.getOrElse {
+            "Usernames must be 3-20 chars: lowercase letters, numbers, underscore only."
+        }
+    val usernameOk = usernameError == null
+
+    val emailTrimmed = email.trim()
+    val emailOk = Patterns.EMAIL_ADDRESS.matcher(emailTrimmed).matches()
     val passwordOk = password.length >= 6
-    val canSubmit = !isBusy && usernameOk && emailOk && passwordOk
+
+    // UX choice: keep the button enabled when fields are filled, and show clear inline errors.
+    // This avoids the "button isn't working" confusion.
+    val fieldsFilled = normalizedUsername.isNotBlank() && emailTrimmed.isNotBlank() && password.isNotBlank()
+    val canSubmit = !isBusy && fieldsFilled
 
     // Exact-style create-account screen (replicates screenshot layout/colors).
     val gradient =
@@ -582,126 +627,165 @@ private fun SignupScreen(
         }
 
         Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 28.dp)
-                    .verticalScroll(rememberScrollState())
-                    .imePadding(),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(80.dp))
+            // Scrollable content (validation messages can grow here without pushing the CTA off-screen)
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(80.dp))
 
-            Image(
-                painter = painterResource(id = R.drawable.flixr_logo_solo),
-                contentDescription = null,
-                modifier = Modifier.height(logoHeight),
-                contentScale = ContentScale.Fit,
-            )
-
-            Spacer(Modifier.height(18.dp))
-
-            Text(
-                text = "Create\nAccount",
-                style = MaterialTheme.typography.titleLarge.copy(fontSize = 40.sp, lineHeight = 42.sp),
-                color = Color.White,
-                textAlign = TextAlign.Center,
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            Text(
-                text = "Already Registered? Log in here.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.75f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.clickable(enabled = !isBusy) { onGoLogin() },
-            )
-
-            Spacer(Modifier.height(30.dp))
-
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "USERNAME",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                PillTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    placeholder = "jiara_martins",
-                    keyboardType = KeyboardType.Text,
-                    enabled = !isBusy,
+                Image(
+                    painter = painterResource(id = R.drawable.flixr_logo_solo),
+                    contentDescription = null,
+                    modifier = Modifier.height(logoHeight),
+                    contentScale = ContentScale.Fit,
                 )
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(18.dp))
 
                 Text(
-                    text = "EMAIL",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                PillTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    placeholder = "hello@reallygreatsite.com",
-                    keyboardType = KeyboardType.Email,
-                    enabled = !isBusy,
-                )
-
-                Spacer(Modifier.height(6.dp))
-
-                Text(
-                    text = "PASSWORD",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                PillTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    placeholder = "******",
-                    keyboardType = KeyboardType.Password,
-                    enabled = !isBusy,
-                    isPassword = true,
-                )
-            }
-
-            if (!errorMessage.isNullOrBlank()) {
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    text = errorMessage,
-                    color = Color.White.copy(alpha = 0.9f),
-                    modifier = Modifier.fillMaxWidth().alpha(0.9f),
+                    text = "Create\nAccount",
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 40.sp, lineHeight = 42.sp),
+                    color = Color.White,
                     textAlign = TextAlign.Center,
                 )
-            }
 
-            Spacer(Modifier.height(26.dp))
-
-            OutlinedButton(
-                onClick = { onSignUp(username, email, password) },
-                enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                shape = RoundedCornerShape(28.dp),
-                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.9f)),
-                colors =
-                    ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color.White,
-                        disabledContentColor = Color.White.copy(alpha = 0.5f),
-                    ),
-            ) {
-                Text(
-                    text = "Sign up",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                )
-            }
-
-            if (isBusy) {
                 Spacer(Modifier.height(10.dp))
-                LinearBusy()
+
+                Text(
+                    text = "Already Registered? Log in here.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.75f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable(enabled = !isBusy) { onGoLogin() },
+                )
+
+                Spacer(Modifier.height(30.dp))
+
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        text = "USERNAME",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.75f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PillTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        placeholder = "jiara_martins",
+                        keyboardType = KeyboardType.Text,
+                        enabled = !isBusy,
+                    )
+                    if (!usernameOk && normalizedUsername.isNotBlank()) {
+                        Text(
+                            text = "Use 3–20 chars: a–z, 0–9, underscore. (example: jiara_martins)",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "EMAIL",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.75f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PillTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        placeholder = "hello@reallygreatsite.com",
+                        keyboardType = KeyboardType.Email,
+                        enabled = !isBusy,
+                    )
+                    if (!emailOk && emailTrimmed.isNotBlank()) {
+                        Text(
+                            text = "Please enter a valid email address.",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "PASSWORD",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.75f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PillTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        placeholder = "******",
+                        keyboardType = KeyboardType.Password,
+                        enabled = !isBusy,
+                        isPassword = true,
+                    )
+                    if (!passwordOk && password.isNotBlank()) {
+                        Text(
+                            text = "Password must be at least 6 characters.",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = errorMessage,
+                        color = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.fillMaxWidth().alpha(0.9f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                // Breathing room above the pinned CTA.
+                Spacer(Modifier.height(18.dp))
+            }
+
+            // Pinned bottom CTA (stays visible; moves above keyboard).
+            Column(
+                modifier = Modifier.fillMaxWidth().imePadding().padding(bottom = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        if (!usernameOk || !emailOk || !passwordOk) return@OutlinedButton
+                        onSignUp(normalizedUsername, emailTrimmed, password)
+                    },
+                    enabled = canSubmit && usernameOk && emailOk && passwordOk,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.9f)),
+                    colors =
+                        ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            disabledContentColor = Color.White.copy(alpha = 0.5f),
+                        ),
+                ) {
+                    Text(
+                        text = "Sign up",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+
+                if (isBusy) {
+                    Spacer(Modifier.height(10.dp))
+                    LinearBusy()
+                }
             }
         }
     }

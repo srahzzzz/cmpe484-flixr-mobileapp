@@ -1,3 +1,14 @@
 <resources>
     <string name="app_name">Flixr</string>
+
+    <!--
+      Google Sign-In requires a Web client ID (OAuth 2.0 client of type "Web application").
+
+      After you enable Google Sign-In in Firebase and register your app SHA-1/256,
+      re-download google-services.json. It should contain oauth_client entries, including a
+      "client_type": 3 (Web client) whose "client_id" belongs here.
+
+      Until this is filled in, the Google Sign-In button will show a helpful error instead of crashing.
+    -->
+    <string name="default_web_client_id">REPLACE_ME_WEB_CLIENT_ID.apps.googleusercontent.com</string>
 </resources>

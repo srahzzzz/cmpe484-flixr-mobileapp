@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launch screen background.
+
+  This is shown immediately on app startup (pre-Android 12) as the Activity window background,
+  and it also works as a fallback if the Android 12 SplashScreen API isn't available.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Full-bleed bitmap -->
+    <item>
+        <bitmap
+            android:src="@drawable/flixeropeningpage"
+            android:gravity="fill" />
+    </item>
+</layer-list>
+

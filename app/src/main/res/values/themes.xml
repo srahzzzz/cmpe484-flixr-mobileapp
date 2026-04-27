@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Compose app: we don't require AppCompat resources/themes. -->
     <style name="Theme.Flixr" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      Launch theme that shows the opening image immediately.
+      We swap to Theme.Flixr in MainActivity after startup.
+    -->
+    <style name="Theme.Flixr.Launch" parent="Theme.Flixr">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
 </resources>

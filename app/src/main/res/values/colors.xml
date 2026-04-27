@@ -7,4 +7,7 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Flixr splash/login deep blue (matches design) -->
+    <color name="flixr_deep_blue">#FF0B1D5C</color>
 </resources>

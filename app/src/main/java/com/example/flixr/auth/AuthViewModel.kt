@@ -2,6 +2,7 @@ package com.example.flixr.auth
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -135,6 +136,38 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 repo.signOutEverywhere()
             } catch (e: Exception) {
                 _state.update { it.copy(isBusy = false, errorMessage = e.message ?: "Sign out failed.") }
+            }
+        }
+    }
+
+    fun updateProfile(
+        username: String,
+        bio: String,
+        newLocalPhoto: Uri?,
+    ) {
+        val user = _state.value.firebaseUser ?: return
+        val currentProfile = _state.value.profile ?: return
+
+        viewModelScope.launch {
+            _state.update { it.copy(isBusy = true, errorMessage = null) }
+            try {
+                val uploadedUrl =
+                    if (newLocalPhoto != null) repo.uploadProfilePicture(user.uid, newLocalPhoto) else null
+
+                repo.updateUserProfile(
+                    uid = user.uid,
+                    currentUsername = currentProfile.username,
+                    newUsernameRaw = username,
+                    newBio = bio,
+                    newProfilePictureUrl = uploadedUrl,
+                )
+
+                val refreshed = repo.getUserProfileOrNull(user.uid)
+                _state.update { it.copy(isBusy = false, profile = refreshed, needsUsername = false) }
+            } catch (e: UsernameTakenException) {
+                _state.update { it.copy(isBusy = false, errorMessage = e.message) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isBusy = false, errorMessage = e.message ?: "Failed to update profile.") }
             }
         }
     }

@@ -20,6 +20,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Set TMDB_API_KEY in local.properties (recommended):
+        // TMDB_API_KEY=your_key_here
+        // Do NOT commit the real key.
+        val tmdbKey = (project.findProperty("TMDB_API_KEY") as String?) ?: ""
+        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbKey\"")
     }
 
     buildTypes {
@@ -37,6 +43,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -45,6 +52,12 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.okhttp.logging)
+    implementation(libs.coil.compose)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

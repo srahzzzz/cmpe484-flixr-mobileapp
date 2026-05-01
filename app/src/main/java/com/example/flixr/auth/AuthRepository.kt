@@ -2,6 +2,7 @@ package com.example.flixr.auth
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import com.example.flixr.R
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -14,6 +15,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -33,6 +35,7 @@ class AuthRepository(
     private val appContext: Context,
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    private val storage: FirebaseStorage = FirebaseStorage.getInstance(),
 ) {
     private fun usersCollection() = db.collection("users")
     private fun usernamesCollection() = db.collection("usernames")
@@ -116,6 +119,92 @@ class AuthRepository(
         if (!snap.exists()) return null
         val data = snap.data ?: return null
         return UserProfile.fromFirestore(data, fallbackUid = uid)
+    }
+
+    /**
+     * Uploads the image to Firebase Storage and returns its download URL.
+     */
+    suspend fun uploadProfilePicture(uid: String, imageUri: Uri): String {
+        val ref =
+            storage.reference
+                .child("profile_pictures")
+                .child(uid)
+                .child("${System.currentTimeMillis()}.jpg")
+
+        ref.putFile(imageUri).await()
+        return ref.downloadUrl.await().toString()
+    }
+
+    /**
+     * Update profile fields in Firestore (and username mapping if username changes).
+     *
+     * Firestore layout:
+     * - users/{uid}
+     * - usernames/{normalized} -> { uid }
+     *
+     * Username uniqueness is enforced in a transaction.
+     */
+    suspend fun updateUserProfile(
+        uid: String,
+        currentUsername: String,
+        newUsernameRaw: String?,
+        newBio: String?,
+        newProfilePictureUrl: String?,
+    ) {
+        val targetBio = newBio?.trim()
+        val currentNorm = Username.normalize(currentUsername)
+
+        val newUsernameNorm =
+            newUsernameRaw
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { Username.normalize(it) }
+
+        if (newUsernameNorm != null) Username.validateOrThrow(newUsernameNorm)
+
+        val userRef = usersCollection().document(uid)
+        val currentUsernameRef = usernamesCollection().document(currentNorm)
+        val newUsernameRef = newUsernameNorm?.let { usernamesCollection().document(it) }
+
+        db.runTransaction { tx ->
+            if (newUsernameRef != null && newUsernameNorm != currentNorm) {
+                val newSnap = tx.get(newUsernameRef)
+                if (newSnap.exists()) {
+                    val existingUid = newSnap.getString("uid").orEmpty()
+                    if (existingUid.isNotBlank() && existingUid != uid && existingUid != "__RESERVED__") {
+                        throw UsernameTakenException("That username is already taken.")
+                    }
+                }
+                tx.set(newUsernameRef, mapOf("uid" to uid, "created_at" to Timestamp.now()), SetOptions.merge())
+                // Best-effort cleanup of the old mapping (only if it points to this user).
+                val oldSnap = tx.get(currentUsernameRef)
+                val oldUid = oldSnap.getString("uid").orEmpty()
+                if (oldSnap.exists() && oldUid == uid) {
+                    tx.delete(currentUsernameRef)
+                }
+            }
+
+            val updates = linkedMapOf<String, Any?>()
+            if (newUsernameNorm != null && newUsernameNorm != currentNorm) updates["username"] = newUsernameNorm
+            if (targetBio != null) updates["bio"] = targetBio
+            if (newProfilePictureUrl != null) updates["profile_picture"] = newProfilePictureUrl
+
+            if (updates.isNotEmpty()) {
+                tx.set(userRef, updates, SetOptions.merge())
+            }
+            null
+        }.await()
+
+        // Optional: keep FirebaseAuth displayName/photoUrl in sync (non-critical).
+        runCatching {
+            val user = auth.currentUser
+            if (user != null && user.uid == uid) {
+                val builder = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                if (newUsernameNorm != null && newUsernameNorm != currentNorm) builder.setDisplayName(newUsernameNorm)
+                if (!newProfilePictureUrl.isNullOrBlank()) builder.setPhotoUri(Uri.parse(newProfilePictureUrl))
+                user.updateProfile(builder.build()).await()
+            }
+        }
     }
 
     suspend fun loginEmail(email: String, password: String) {

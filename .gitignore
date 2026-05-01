@@ -1,5 +1,6 @@
 *.iml
 .gradle
+/.kotlin
 /local.properties
 /.idea/caches
 /.idea/libraries
@@ -7,9 +8,30 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+.idea/deploymentTargetSelector.xml
+.idea/gradle.xml
+.idea/misc.xml
+.idea/codeStyles/
+.idea/deviceManager.xml
+.idea/migrations.xml
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
 local.properties
+
+# Local SDK / tools folders accidentally created in repo root
+/Sdk/
+/platform-tools/
+
+# Crash / replay logs
+hs_err_pid*.log
+replay_pid*.log
+*.log
+
+# Gradle daemon local config
+/gradle/gradle-daemon-jvm.properties
+
+# Stray file created by tooling
+/-Pattern

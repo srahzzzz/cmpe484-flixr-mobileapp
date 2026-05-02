@@ -15,47 +15,26 @@ private val flixrFont = FontFamily(
     Font(R.font.poppins_bold, weight = FontWeight.Bold),
 )
 
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = flixrFont,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    ),
-    titleLarge = TextStyle(
-        fontFamily = flixrFont,
-        fontWeight = FontWeight.Bold,
-        fontSize = 34.sp,
-        lineHeight = 40.sp,
-        letterSpacing = 0.sp
-    ),
-    titleMedium = TextStyle(
-        fontFamily = flixrFont,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 18.sp,
-        lineHeight = 24.sp
-    ),
-    labelLarge = TextStyle(
-        fontFamily = flixrFont,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 12.sp,
-        letterSpacing = 1.2.sp
+private val baseline = Typography()
+
+private fun TextStyle.withFlixrFont(): TextStyle = copy(fontFamily = flixrFont)
+
+/** App-wide typography: Material roles + Poppins for a cohesive streaming-app feel. */
+val Typography =
+    Typography(
+        displayLarge = baseline.displayLarge.withFlixrFont(),
+        displayMedium = baseline.displayMedium.withFlixrFont(),
+        displaySmall = baseline.displaySmall.withFlixrFont(),
+        headlineLarge = baseline.headlineLarge.withFlixrFont(),
+        headlineMedium = baseline.headlineMedium.withFlixrFont(),
+        headlineSmall = baseline.headlineSmall.withFlixrFont(),
+        titleLarge = baseline.titleLarge.withFlixrFont().copy(fontWeight = FontWeight.Bold),
+        titleMedium = baseline.titleMedium.withFlixrFont().copy(fontWeight = FontWeight.SemiBold),
+        titleSmall = baseline.titleSmall.withFlixrFont().copy(fontWeight = FontWeight.SemiBold),
+        bodyLarge = baseline.bodyLarge.withFlixrFont(),
+        bodyMedium = baseline.bodyMedium.withFlixrFont(),
+        bodySmall = baseline.bodySmall.withFlixrFont(),
+        labelLarge = baseline.labelLarge.withFlixrFont(),
+        labelMedium = baseline.labelMedium.withFlixrFont(),
+        labelSmall = baseline.labelSmall.withFlixrFont(),
     )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
-)

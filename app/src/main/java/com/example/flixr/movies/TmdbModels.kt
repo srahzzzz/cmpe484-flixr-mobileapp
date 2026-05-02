@@ -10,6 +10,8 @@ data class Movie(
     @SerializedName("release_date")
     val releaseDate: String?,
     val overview: String?,
+    @SerializedName("vote_average")
+    val voteAverage: Double? = null,
 )
 
 data class MovieResponse(

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -24,7 +26,14 @@ android {
         // Set TMDB_API_KEY in local.properties (recommended):
         // TMDB_API_KEY=your_key_here
         // Do NOT commit the real key.
-        val tmdbKey = (project.findProperty("TMDB_API_KEY") as String?) ?: ""
+        val localProperties = Properties()
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            localProperties.load(localPropertiesFile.inputStream())
+        }
+        val tmdbKey = localProperties.getProperty("TMDB_API_KEY")
+            ?: (project.findProperty("TMDB_API_KEY") as String?)
+            ?: ""
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbKey\"")
     }
 

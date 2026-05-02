@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +27,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
@@ -57,11 +59,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,6 +92,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.min
 import android.util.Patterns
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.List
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -857,6 +863,30 @@ private fun GoogleUsernameOnboardingScreen(
 }
 
 @Composable
+private fun HomeSectionTitle(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .width(4.dp)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
 private fun HomeScreen(
     username: String,
     email: String,
@@ -865,9 +895,12 @@ private fun HomeScreen(
     onClearError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    var screen by remember { mutableStateOf("home") } // "home" | "details" | "profile"
+    var screen by remember { mutableStateOf("home") } // "home" | "details" | "profile" | "watchlist"
+    var detailsReturnScreen by remember { mutableStateOf("home") }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
+    var trendingMovies by remember { mutableStateOf<List<Movie>>(emptyList()) }
+    var isLoadingTrending by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<Movie?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
     var isSearching by remember { mutableStateOf(false) }
@@ -876,6 +909,26 @@ private fun HomeScreen(
 
     val reviewRepo = remember { ReviewRepository() }
     val savedRepo = remember { SavedMovieRepository() }
+
+    LaunchedEffect(Unit) {
+        val apiKey = BuildConfig.TMDB_API_KEY.trim()
+        if (apiKey.isBlank()) {
+            isLoadingTrending = false
+            localError = "TMDB API key missing. Add TMDB_API_KEY to local.properties, sync, and rebuild."
+            return@LaunchedEffect
+        }
+        var feedError: String? = null
+        try {
+            trendingMovies = TmdbClient.api.getTrendingMovies(apiKey).results
+        } catch (e: Exception) {
+            feedError = e.message ?: "Failed to load trending movies."
+        } finally {
+            isLoadingTrending = false
+        }
+        if (feedError != null) {
+            localError = feedError
+        }
+    }
 
     fun doSearch() {
         val q = query.trim()
@@ -905,7 +958,20 @@ private fun HomeScreen(
             movie = selected!!,
             reviewRepo = reviewRepo,
             savedRepo = savedRepo,
+            onBack = { screen = detailsReturnScreen },
+        )
+        return
+    }
+
+    if (screen == "watchlist") {
+        WatchlistScreen(
+            savedRepo = savedRepo,
             onBack = { screen = "home" },
+            onOpenMovie = { movie ->
+                detailsReturnScreen = "watchlist"
+                selected = movie
+                screen = "details"
+            },
         )
         return
     }
@@ -917,99 +983,221 @@ private fun HomeScreen(
         return
     }
 
-    Column(
-        modifier = Modifier.padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors =
+                            listOf(
+                                MaterialTheme.colorScheme.background,
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                FlixrGradientTopRight.copy(alpha = 0.07f),
+                                FlixrGradientBottomLeft.copy(alpha = 0.06f),
+                            ),
+                    ),
+                ),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Home", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            IconButton(onClick = { screen = "profile" }) {
-                Icon(imageVector = Icons.Filled.AccountCircle, contentDescription = "Profile")
-            }
-        }
-        Text("Username: $username")
-        Text("Email: $email")
-
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Search movie") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-            keyboardActions = KeyboardActions(onSearch = { doSearch() }),
-        )
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = { doSearch() },
-                enabled = !isSearching && query.trim().isNotBlank(),
-                modifier = Modifier.weight(1f),
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 2.dp,
+                shadowElevation = 0.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
             ) {
-                Text(if (isSearching) "Searching..." else "Search")
-            }
-            TextButton(
-                onClick = { results = emptyList(); query = ""; localError = null },
-                enabled = !isSearching,
-            ) {
-                Text("Clear")
-            }
-        }
-
-        if (!localError.isNullOrBlank()) {
-            Text(text = localError!!, color = MaterialTheme.colorScheme.error)
-        }
-        if (!errorMessage.isNullOrBlank()) {
-            Text(text = errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-
-        if (results.isNotEmpty()) {
-            Text("Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(results) { movie ->
-                    OutlinedButton(
-                        onClick = {
-                            selected = movie
-                            screen = "details"
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            TmdbPosterThumb(movie = movie)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(movie.title, fontWeight = FontWeight.SemiBold)
-                                val date = movie.releaseDate?.takeIf { it.isNotBlank() } ?: "Unknown release date"
-                                Text(date, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                            }
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Home",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = if (username.isNotBlank()) "Hi, $username" else "Welcome",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (email.isNotBlank()) {
+                            Text(
+                                text = email,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        IconButton(onClick = { screen = "watchlist" }) {
+                            Icon(
+                                imageVector = Icons.Filled.List,
+                                contentDescription = "Watchlist",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        IconButton(onClick = { screen = "profile" }) {
+                            Icon(
+                                imageVector = Icons.Filled.AccountCircle,
+                                contentDescription = "Profile",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                 }
             }
-        }
 
-        Button(
-            onClick = {
-                onClearError()
-                onSignOut()
-            },
-            enabled = !isBusy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Sign out")
-        }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors =
+                    OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                    ),
+                label = { Text("Search movies") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                keyboardActions = KeyboardActions(onSearch = { doSearch() }),
+            )
 
-        if (isBusy) LinearBusy()
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = { doSearch() },
+                    enabled = !isSearching && query.trim().isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                ) {
+                    Text(if (isSearching) "Searching..." else "Search")
+                }
+                TextButton(
+                    onClick = { results = emptyList(); query = ""; localError = null },
+                    enabled = !isSearching,
+                    colors =
+                        ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ),
+                ) {
+                    Text("Clear")
+                }
+            }
+
+            if (!localError.isNullOrBlank()) {
+                Text(text = localError!!, color = MaterialTheme.colorScheme.error)
+            }
+            if (!errorMessage.isNullOrBlank()) {
+                Text(text = errorMessage, color = MaterialTheme.colorScheme.error)
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (isLoadingTrending && trendingMovies.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(220.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+
+                if (trendingMovies.isNotEmpty()) {
+                    item {
+                        HomeSectionTitle("Trending this week")
+                    }
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        items(trendingMovies, key = { it.id }) { movie ->
+                            NetflixShelfMovieCard(
+                                movie = movie,
+                                onClick = {
+                                    detailsReturnScreen = "home"
+                                    selected = movie
+                                    screen = "details"
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+                if (results.isNotEmpty()) {
+                    item {
+                        HomeSectionTitle("Search results")
+                    }
+                    items(results, key = { it.id }) { movie ->
+                        HomeSearchResultRow(
+                            movie = movie,
+                            onClick = {
+                                detailsReturnScreen = "home"
+                                selected = movie
+                                screen = "details"
+                            },
+                        )
+                    }
+                }
+
+                if (!isLoadingTrending && trendingMovies.isEmpty() && results.isEmpty() && localError.isNullOrBlank()) {
+                    item {
+                        Text(
+                            text = "Search above to find movies, or check back when trending loads.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = {
+                    onClearError()
+                    onSignOut()
+                },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors =
+                    ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+            ) {
+                Text("Sign out")
+            }
+
+            if (isBusy) LinearBusy()
+        }
     }
 }
 
@@ -1045,63 +1233,118 @@ private fun MovieDetailsScreen(
         }
     }
 
+    val scroll = rememberScrollState()
     Column(
-        modifier = Modifier.padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .imePadding(),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back to search") }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
         ) {
-            TmdbPosterLarge(movie = movie)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(movie.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                val date = movie.releaseDate?.takeIf { it.isNotBlank() }
-                if (date != null) {
-                    Text(date, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            MovieDetailHeroPoster(movie = movie)
+            Surface(
+                modifier =
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                tonalElevation = 2.dp,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = "Back",
+                    )
                 }
             }
         }
 
-        if (!movie.overview.isNullOrBlank()) {
-            Text(movie.overview!!, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
-        }
-
-        OutlinedButton(
-            onClick = {
-                val uid = FirebaseAuth.getInstance().currentUser?.uid
-                if (uid.isNullOrBlank()) {
-                    error = "You must be logged in to save movies."
-                    return@OutlinedButton
-                }
-                isSaving = true
-                error = null
-                savedMessage = null
-                scope.launch {
-                    try {
-                        savedRepo.saveMovieForUser(uid, movie)
-                        savedMessage = "Saved to Firestore."
-                    } catch (e: Exception) {
-                        error = e.message ?: "Failed to save movie."
-                    } finally {
-                        isSaving = false
-                    }
-                }
-            },
-            enabled = !isSaving,
-            modifier = Modifier.fillMaxWidth(),
+        Column(
+            modifier =
+                Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 16.dp, bottom = 20.dp)
+                    .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(imageVector = Icons.Filled.Favorite, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(if (isSaving) "Saving..." else "Save movie")
-        }
+            Text(
+                text = movie.title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
 
-        if (!savedMessage.isNullOrBlank()) {
-            Text(savedMessage!!, color = MaterialTheme.colorScheme.primary)
-        }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val date = movie.releaseDate?.takeIf { it.isNotBlank() }
+                if (date != null) {
+                    Text(
+                        date,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                    )
+                }
+                movie.voteAverage?.let { avg ->
+                    Text(
+                        text = "TMDB ★ ${String.format("%.1f", avg)}",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            if (!movie.overview.isNullOrBlank()) {
+                Text(
+                    text = movie.overview!!,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    val uid = FirebaseAuth.getInstance().currentUser?.uid
+                    if (uid.isNullOrBlank()) {
+                        error = "You must be logged in to add movies."
+                        return@OutlinedButton
+                    }
+                    isSaving = true
+                    error = null
+                    savedMessage = null
+                    scope.launch {
+                        try {
+                            savedRepo.saveMovieForUser(uid, movie)
+                            savedMessage = "Added to your watchlist."
+                        } catch (e: Exception) {
+                            error = e.message ?: "Could not save to watchlist."
+                        } finally {
+                            isSaving = false
+                        }
+                    }
+                },
+                enabled = !isSaving,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(imageVector = Icons.Filled.Favorite, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text(if (isSaving) "Saving..." else "Add to Watchlist")
+            }
+
+            if (!savedMessage.isNullOrBlank()) {
+                Text(savedMessage!!, color = MaterialTheme.colorScheme.primary)
+            }
 
         Text("Write a review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
 
@@ -1174,8 +1417,8 @@ private fun MovieDetailsScreen(
         } else if (reviews.isEmpty()) {
             Text("No reviews yet.")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(reviews) { r ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (r in reviews) {
                     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Rating: ${r.rating}/10", fontWeight = FontWeight.SemiBold)
@@ -1186,6 +1429,7 @@ private fun MovieDetailsScreen(
             }
         }
     }
+    }
 }
 
 private fun tmdbPosterUrl(path: String?, width: Int): String? {
@@ -1193,6 +1437,131 @@ private fun tmdbPosterUrl(path: String?, width: Int): String? {
     if (p.isBlank()) return null
     // `poster_path` usually starts with "/" already. Both variants work.
     return "https://image.tmdb.org/t/p/w$width$p"
+}
+
+@Composable
+private fun MovieDetailHeroPoster(movie: Movie) {
+    val url = tmdbPosterUrl(movie.posterPath, width = 780)
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (url == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "No poster available",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            AsyncImage(
+                model = url,
+                contentDescription = movie.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+    }
+}
+
+/** Netflix-style horizontal shelf tile (poster + title + date). */
+@Composable
+private fun NetflixShelfMovieCard(
+    movie: Movie,
+    onClick: () -> Unit,
+) {
+    val dateLabel = movie.releaseDate?.takeIf { it.isNotBlank() } ?: "—"
+    Column(
+        modifier =
+            Modifier
+                .width(140.dp)
+                .clickable(onClick = onClick),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(200.dp),
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 2.dp,
+        ) {
+            val url = tmdbPosterUrl(movie.posterPath, width = 342)
+            if (url == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No poster",
+                        textAlign = TextAlign.Center,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = url,
+                    contentDescription = movie.title,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+        Text(
+            text = movie.title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = dateLabel,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun HomeSearchResultRow(
+    movie: Movie,
+    onClick: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+    removeInProgress: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TmdbPosterThumb(movie = movie)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(movie.title, fontWeight = FontWeight.SemiBold)
+                    val date = movie.releaseDate?.takeIf { it.isNotBlank() } ?: "Unknown release date"
+                    Text(date, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                }
+            }
+        }
+        if (onRemove != null) {
+            IconButton(
+                onClick = onRemove,
+                enabled = !removeInProgress,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Remove from watchlist",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1242,6 +1611,116 @@ private fun TmdbPosterLarge(movie: Movie) {
 }
 
 @Composable
+private fun WatchlistScreen(
+    savedRepo: SavedMovieRepository,
+    onBack: () -> Unit,
+    onOpenMovie: (Movie) -> Unit,
+) {
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    var movies by remember { mutableStateOf<List<Movie>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var deletingMovieId by remember { mutableStateOf<Int?>(null) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(uid) {
+        if (uid.isNullOrBlank()) {
+            loading = false
+            movies = emptyList()
+            loadError = "Sign in to view your watchlist."
+            return@LaunchedEffect
+        }
+        loading = true
+        loadError = null
+        try {
+            movies = savedRepo.getWatchlistForUser(uid)
+        } catch (e: Exception) {
+            loadError = e.message ?: "Could not load watchlist."
+        } finally {
+            loading = false
+        }
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text("Back")
+        }
+        Text(
+            text = "My Watchlist",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        if (!deleteError.isNullOrBlank()) {
+            Text(deleteError!!, color = MaterialTheme.colorScheme.error)
+        }
+
+        when {
+            loading -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+            loadError != null -> {
+                Text(loadError!!, color = MaterialTheme.colorScheme.error)
+            }
+            movies.isEmpty() -> {
+                Text(
+                    text = "No movies saved yet. Open a title and tap Add to Watchlist.",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(movies, key = { it.id }) { movie ->
+                        HomeSearchResultRow(
+                            movie = movie,
+                            onClick = { onOpenMovie(movie) },
+                            onRemove =
+                                if (uid.isNullOrBlank()) {
+                                    null
+                                } else {
+                                    {
+                                        val u = uid
+                                        scope.launch {
+                                            deletingMovieId = movie.id
+                                            deleteError = null
+                                            try {
+                                                savedRepo.removeMovieFromWatchlist(u, movie.id)
+                                                movies = savedRepo.getWatchlistForUser(u)
+                                            } catch (e: Exception) {
+                                                deleteError = e.message ?: "Could not remove movie."
+                                            } finally {
+                                                deletingMovieId = null
+                                            }
+                                        }
+                                    }
+                                },
+                            removeInProgress = deletingMovieId == movie.id,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfileScreen(
     viewModel: AuthViewModel = viewModel(),
     onBack: () -> Unit,
@@ -1273,6 +1752,11 @@ private fun ProfileScreen(
         }
 
         Text("Profile", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            text = "Your saved movies appear on the Watchlist screen (list icon on Home).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+        )
 
         val photoModel = pickedImage ?: profile?.profilePictureUrl
         Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {

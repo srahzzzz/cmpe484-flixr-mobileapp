@@ -1,6 +1,7 @@
 package com.example.flixr.movies
 
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface TmdbApi {
@@ -14,5 +15,11 @@ interface TmdbApi {
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
     ): MovieResponse
+
+    @GET("movie/{movie_id}")
+    suspend fun getMovieDetails(
+        @Path("movie_id") movieId: Int,
+        @Query("api_key") apiKey: String,
+    ): MovieDetails
 }
 

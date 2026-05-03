@@ -18,3 +18,15 @@ data class MovieResponse(
     val results: List<Movie> = emptyList(),
 )
 
+data class Genre(
+    val id: Int,
+    val name: String,
+)
+
+/** TMDB GET /movie/{id} — used for analytics (runtime, genres). */
+data class MovieDetails(
+    val id: Int,
+    val runtime: Int? = null,
+    val genres: List<Genre> = emptyList(),
+)
+

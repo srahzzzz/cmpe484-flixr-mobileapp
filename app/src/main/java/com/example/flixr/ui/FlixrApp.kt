@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedButton
@@ -82,8 +83,13 @@ import com.example.flixr.auth.AuthViewModel
 import com.example.flixr.movies.Movie
 import com.example.flixr.movies.SavedMovieRepository
 import com.example.flixr.movies.TmdbClient
+import com.example.flixr.movies.WatchHistoryRepository
+import com.example.flixr.reviews.LikeRepository
 import com.example.flixr.reviews.Review
 import com.example.flixr.reviews.ReviewRepository
+import com.example.flixr.social.FollowRepository
+import com.example.flixr.stats.AnalyticsRepository
+import com.example.flixr.stats.UserAnalytics
 import com.google.firebase.auth.FirebaseAuth
 import com.example.flixr.ui.theme.FlixrGradientBottomLeft
 import com.example.flixr.ui.theme.FlixrGradientTopRight
@@ -94,6 +100,8 @@ import android.util.Patterns
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -895,7 +903,7 @@ private fun HomeScreen(
     onClearError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    var screen by remember { mutableStateOf("home") } // "home" | "details" | "profile" | "watchlist"
+    var screen by remember { mutableStateOf("home") } // "home" | "details" | "social" | "analytics" | "profile" | "watchlist"
     var detailsReturnScreen by remember { mutableStateOf("home") }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Movie>>(emptyList()) }
@@ -908,7 +916,11 @@ private fun HomeScreen(
     val focusManager = LocalFocusManager.current
 
     val reviewRepo = remember { ReviewRepository() }
+    val likeRepo = remember { LikeRepository() }
+    val followRepo = remember { FollowRepository() }
     val savedRepo = remember { SavedMovieRepository() }
+    val watchHistoryRepo = remember { WatchHistoryRepository() }
+    val analyticsRepo = remember { AnalyticsRepository() }
 
     LaunchedEffect(Unit) {
         val apiKey = BuildConfig.TMDB_API_KEY.trim()
@@ -957,7 +969,9 @@ private fun HomeScreen(
         MovieDetailsScreen(
             movie = selected!!,
             reviewRepo = reviewRepo,
+            likeRepo = likeRepo,
             savedRepo = savedRepo,
+            watchHistoryRepo = watchHistoryRepo,
             onBack = { screen = detailsReturnScreen },
         )
         return
@@ -976,9 +990,43 @@ private fun HomeScreen(
         return
     }
 
+    if (screen == "social") {
+        SocialFeedScreen(
+            followRepo = followRepo,
+            reviewRepo = reviewRepo,
+            likeRepo = likeRepo,
+            onBack = { screen = "home" },
+            onOpenMovieFromContentId = { contentId ->
+                val mid = contentId.toIntOrNull() ?: 0
+                selected =
+                    Movie(
+                        id = mid,
+                        title = "TMDB $mid",
+                        posterPath = null,
+                        releaseDate = null,
+                        overview = null,
+                        voteAverage = null,
+                    )
+                detailsReturnScreen = "social"
+                screen = "details"
+            },
+        )
+        return
+    }
+
+    if (screen == "analytics") {
+        AnalyticsScreen(
+            analyticsRepo = analyticsRepo,
+            tmdbApiKey = BuildConfig.TMDB_API_KEY.trim(),
+            onBack = { screen = "home" },
+        )
+        return
+    }
+
     if (screen == "profile") {
         ProfileScreen(
             onBack = { screen = "home" },
+            onOpenAnalytics = { screen = "analytics" },
         )
         return
     }
@@ -1048,6 +1096,20 @@ private fun HomeScreen(
                             Icon(
                                 imageVector = Icons.Filled.List,
                                 contentDescription = "Watchlist",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        IconButton(onClick = { screen = "analytics" }) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = "Analytics",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        IconButton(onClick = { screen = "social" }) {
+                            Icon(
+                                imageVector = Icons.Filled.Person,
+                                contentDescription = "Following and activity",
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -1202,14 +1264,80 @@ private fun HomeScreen(
 }
 
 @Composable
+private fun ReviewLikeRow(
+    review: Review,
+    currentUid: String?,
+    likeRepo: LikeRepository,
+    likedReviewIds: Set<String>,
+    onLikedIdsChange: (Set<String>) -> Unit,
+    busyReviewId: String?,
+    onBusyChange: (String?) -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val liked = review.review_id.isNotBlank() && review.review_id in likedReviewIds
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        IconButton(
+            onClick = {
+                val uid = currentUid ?: run {
+                    onError("Sign in to like reviews.")
+                    return@IconButton
+                }
+                val rid = review.review_id
+                if (rid.isBlank()) return@IconButton
+                scope.launch {
+                    onBusyChange(rid)
+                    onError(null)
+                    try {
+                        likeRepo.toggleLike(uid, rid)
+                        onLikedIdsChange(
+                            if (liked) likedReviewIds - rid else likedReviewIds + rid,
+                        )
+                    } catch (e: Exception) {
+                        onError(e.message ?: "Could not update like.")
+                    } finally {
+                        onBusyChange(null)
+                    }
+                }
+            },
+            enabled =
+                (busyReviewId == null || busyReviewId != review.review_id) &&
+                    review.review_id.isNotBlank(),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Favorite,
+                contentDescription = if (liked) "Unlike" else "Like",
+                tint =
+                    if (liked) {
+                        Color(0xFFE91E63)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                    },
+            )
+        }
+        Text(
+            text = "${review.likes_count}",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun MovieDetailsScreen(
     movie: Movie,
     reviewRepo: ReviewRepository,
+    likeRepo: LikeRepository,
     savedRepo: SavedMovieRepository,
+    watchHistoryRepo: WatchHistoryRepository,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val currentUid = FirebaseAuth.getInstance().currentUser?.uid
 
     var ratingText by remember { mutableStateOf("5") }
     var reviewText by remember { mutableStateOf("") }
@@ -1219,17 +1347,50 @@ private fun MovieDetailsScreen(
     var reviews by remember { mutableStateOf<List<Review>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var savedMessage by remember { mutableStateOf<String?>(null) }
+    var watchHistoryMessage by remember { mutableStateOf<String?>(null) }
+    var isWatchBusy by remember { mutableStateOf(false) }
+
+    var likedReviewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var likeBusyReviewId by remember { mutableStateOf<String?>(null) }
+
+    val reviewIdsKey = reviews.joinToString(",") { it.review_id }
+    LaunchedEffect(currentUid, reviewIdsKey) {
+        val u = currentUid
+        if (u.isNullOrBlank()) {
+            likedReviewIds = emptySet()
+            return@LaunchedEffect
+        }
+        val ids = reviews.mapNotNull { it.review_id.takeIf { id -> id.isNotBlank() } }
+        likedReviewIds = likeRepo.filterLikedReviewIds(u, ids)
+    }
 
     LaunchedEffect(movie.id) {
+        ratingText = "5"
+        reviewText = ""
         isLoading = true
         error = null
         savedMessage = null
+        watchHistoryMessage = null
         try {
-            reviews = reviewRepo.getReviewsForContent(movie.id.toString())
+            val initial = reviewRepo.getReviewsForContent(movie.id.toString())
+            reviews = initial
+            val uid = FirebaseAuth.getInstance().currentUser?.uid
+            val mine = initial.firstOrNull { it.user_id == uid }
+            if (mine != null) {
+                ratingText = mine.rating.toString()
+                reviewText = mine.review_text
+            }
         } catch (e: Exception) {
             error = e.message ?: "Failed to load reviews."
         } finally {
             isLoading = false
+        }
+        try {
+            reviewRepo.listenReviewsForContent(movie.id.toString()).collect { list ->
+                reviews = list
+            }
+        } catch (e: Exception) {
+            error = e.message ?: "Review sync failed."
         }
     }
 
@@ -1346,89 +1507,195 @@ private fun MovieDetailsScreen(
                 Text(savedMessage!!, color = MaterialTheme.colorScheme.primary)
             }
 
-        Text("Write a review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-
-        OutlinedTextField(
-            value = ratingText,
-            onValueChange = { ratingText = it.filter { ch -> ch.isDigit() }.take(2) },
-            label = { Text("Rating (0-10)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
-
-        OutlinedTextField(
-            value = reviewText,
-            onValueChange = { reviewText = it },
-            label = { Text("Your review") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-        )
-
-        Button(
-            onClick = {
-                val rating = ratingText.toIntOrNull()
-                if (rating == null || rating !in 0..10) {
-                    error = "Rating must be between 0 and 10."
-                    return@Button
-                }
-                val uid = FirebaseAuth.getInstance().currentUser?.uid
-                if (uid.isNullOrBlank()) {
-                    error = "You must be logged in to post reviews."
-                    return@Button
-                }
-
-                focusManager.clearFocus()
-                isSaving = true
-                error = null
-                scope.launch {
-                    try {
-                        reviewRepo.addReview(
-                            Review(
-                                user_id = uid,
-                                content_id = movie.id.toString(),
-                                rating = rating,
-                                review_text = reviewText.trim(),
-                            ),
-                        )
-                        reviewText = ""
-                        ratingText = "5"
-                        reviews = reviewRepo.getReviewsForContent(movie.id.toString())
-                    } catch (e: Exception) {
-                        error = e.message ?: "Failed to save review."
-                    } finally {
-                        isSaving = false
+            OutlinedButton(
+                onClick = {
+                    val uid = FirebaseAuth.getInstance().currentUser?.uid
+                    if (uid.isNullOrBlank()) {
+                        error = "Sign in to track watch history."
+                        return@OutlinedButton
                     }
-                }
-            },
-            enabled = !isSaving && reviewText.trim().isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(if (isSaving) "Posting..." else "Post review")
-        }
+                    isWatchBusy = true
+                    watchHistoryMessage = null
+                    scope.launch {
+                        try {
+                            watchHistoryRepo.markWatched(uid, movie.id.toString())
+                            watchHistoryMessage = "Saved to Watch History."
+                        } catch (e: Exception) {
+                            error = e.message ?: "Could not update watch history."
+                        } finally {
+                            isWatchBusy = false
+                        }
+                    }
+                },
+                enabled = !isWatchBusy && !isSaving,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isWatchBusy) "Saving..." else "Mark as watched")
+            }
 
-        if (!error.isNullOrBlank()) {
-            Text(error!!, color = MaterialTheme.colorScheme.error)
-        }
+            if (!watchHistoryMessage.isNullOrBlank()) {
+                Text(watchHistoryMessage!!, color = MaterialTheme.colorScheme.secondary)
+            }
 
-        Text("Reviews", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        if (isLoading) {
-            LinearBusy()
-        } else if (reviews.isEmpty()) {
-            Text("No reviews yet.")
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (r in reviews) {
-                    Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Rating: ${r.rating}/10", fontWeight = FontWeight.SemiBold)
-                            Text(r.review_text)
+            Text("Write a review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+
+            OutlinedTextField(
+                value = ratingText,
+                onValueChange = { ratingText = it.filter { ch -> ch.isDigit() }.take(2) },
+                label = { Text("Rating (0-10)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+
+            OutlinedTextField(
+                value = reviewText,
+                onValueChange = { reviewText = it },
+                label = { Text("Your review") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+            )
+
+            val myReview = reviews.firstOrNull { it.user_id == currentUid }
+
+            Button(
+                onClick = {
+                    val rating = ratingText.toIntOrNull()
+                    if (rating == null || rating !in 0..10) {
+                        error = "Rating must be between 0 and 10."
+                        return@Button
+                    }
+                    val uid = FirebaseAuth.getInstance().currentUser?.uid
+                    if (uid.isNullOrBlank()) {
+                        error = "You must be logged in to post reviews."
+                        return@Button
+                    }
+
+                    focusManager.clearFocus()
+                    isSaving = true
+                    error = null
+                    scope.launch {
+                        try {
+                            val mineNow = reviews.firstOrNull { it.user_id == uid }
+                            if (mineNow != null && mineNow.review_id.isNotBlank()) {
+                                reviewRepo.updateReview(
+                                    mineNow.copy(
+                                        rating = rating,
+                                        review_text = reviewText.trim(),
+                                        updated_at = System.currentTimeMillis(),
+                                    ),
+                                )
+                            } else {
+                                reviewRepo.addReview(
+                                    Review(
+                                        user_id = uid,
+                                        content_id = movie.id.toString(),
+                                        rating = rating,
+                                        review_text = reviewText.trim(),
+                                    ),
+                                )
+                            }
+                            reviews = reviewRepo.getReviewsForContent(movie.id.toString())
+                            val refreshed = reviews.firstOrNull { it.user_id == uid }
+                            if (refreshed != null) {
+                                ratingText = refreshed.rating.toString()
+                                reviewText = refreshed.review_text
+                            }
+                        } catch (e: Exception) {
+                            error = e.message ?: "Failed to save review."
+                        } finally {
+                            isSaving = false
+                        }
+                    }
+                },
+                enabled = !isSaving && reviewText.trim().isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        isSaving -> "Saving..."
+                        myReview != null -> "Update review"
+                        else -> "Post review"
+                    },
+                )
+            }
+
+            if (!error.isNullOrBlank()) {
+                Text(error!!, color = MaterialTheme.colorScheme.error)
+            }
+
+            Text("Reviews", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (isLoading) {
+                LinearBusy()
+            } else if (reviews.isEmpty()) {
+                Text("No reviews yet.")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (r in reviews) {
+                        Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    if (r.user_id == currentUid) {
+                                        Text(
+                                            "Your review",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    Text("Rating: ${r.rating}/10", fontWeight = FontWeight.SemiBold)
+                                    Text(r.review_text)
+                                }
+                                Column(
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    ReviewLikeRow(
+                                        review = r,
+                                        currentUid = currentUid,
+                                        likeRepo = likeRepo,
+                                        likedReviewIds = likedReviewIds,
+                                        onLikedIdsChange = { likedReviewIds = it },
+                                        busyReviewId = likeBusyReviewId,
+                                        onBusyChange = { likeBusyReviewId = it },
+                                        onError = { error = it },
+                                    )
+                                    if (r.user_id == currentUid && r.review_id.isNotBlank()) {
+                                        IconButton(
+                                            onClick = {
+                                                scope.launch {
+                                                    try {
+                                                        reviewRepo.deleteReview(r.review_id)
+                                                        reviews =
+                                                            reviewRepo.getReviewsForContent(movie.id.toString())
+                                                        ratingText = "5"
+                                                        reviewText = ""
+                                                    } catch (e: Exception) {
+                                                        error = e.message ?: "Failed to delete review."
+                                                    }
+                                                }
+                                            },
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Delete,
+                                                contentDescription = "Delete review",
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-    }
     }
 }
 
@@ -1611,6 +1878,518 @@ private fun TmdbPosterLarge(movie: Movie) {
 }
 
 @Composable
+private fun SocialFeedScreen(
+    followRepo: FollowRepository,
+    reviewRepo: ReviewRepository,
+    likeRepo: LikeRepository,
+    onBack: () -> Unit,
+    onOpenMovieFromContentId: (String) -> Unit,
+) {
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    var followUidInput by remember { mutableStateOf("") }
+    var followingIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var activityReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
+    var feedError by remember { mutableStateOf<String?>(null) }
+    var socialBusy by remember { mutableStateOf(false) }
+    var likedReviewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var likeBusyReviewId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val activityIdsKey = activityReviews.joinToString(",") { it.review_id }
+    LaunchedEffect(uid, activityIdsKey) {
+        val u = uid
+        if (u.isNullOrBlank()) {
+            likedReviewIds = emptySet()
+            return@LaunchedEffect
+        }
+        likedReviewIds =
+            likeRepo.filterLikedReviewIds(u, activityReviews.mapNotNull { it.review_id.takeIf { id -> id.isNotBlank() } })
+    }
+
+    LaunchedEffect(uid) {
+        if (uid.isNullOrBlank()) {
+            followingIds = emptyList()
+            return@LaunchedEffect
+        }
+        followRepo.listenFollowingIds(uid).collect { followingIds = it }
+    }
+
+    LaunchedEffect(followingIds) {
+        if (followingIds.isEmpty()) {
+            activityReviews = emptyList()
+            return@LaunchedEffect
+        }
+        try {
+            reviewRepo.listenReviewsFromUsers(followingIds).collect { activityReviews = it }
+        } catch (e: Exception) {
+            feedError = e.message
+        }
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text("Back")
+        }
+        Text(
+            text = "Following & activity",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "Follow classmates by Firebase UID. Your feed shows their reviews in real time.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (!feedError.isNullOrBlank()) {
+            Text(feedError!!, color = MaterialTheme.colorScheme.error)
+        }
+
+        if (uid.isNullOrBlank()) {
+            Text(
+                "Sign in to follow users and see the activity feed.",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            return@Column
+        }
+
+        OutlinedTextField(
+            value = followUidInput,
+            onValueChange = { followUidInput = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("User ID to follow") },
+            shape = RoundedCornerShape(14.dp),
+            colors =
+                OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                ),
+        )
+        Button(
+            onClick = {
+                val target = followUidInput.trim()
+                if (target.isBlank()) return@Button
+                scope.launch {
+                    socialBusy = true
+                    feedError = null
+                    try {
+                        followRepo.follow(uid, target)
+                        followUidInput = ""
+                    } catch (e: Exception) {
+                        feedError = e.message ?: "Could not follow."
+                    } finally {
+                        socialBusy = false
+                    }
+                }
+            },
+            enabled = followUidInput.isNotBlank() && !socialBusy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Text(if (socialBusy) "Working..." else "Follow")
+        }
+
+        Text(
+            "People you follow",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (followingIds.isEmpty()) {
+            Text(
+                "You are not following anyone yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            "Activity",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(followingIds, key = { it }) { fid ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = fid,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    try {
+                                        followRepo.unfollow(uid, fid)
+                                    } catch (e: Exception) {
+                                        feedError = e.message
+                                    }
+                                }
+                            },
+                        ) {
+                            Text("Unfollow")
+                        }
+                    }
+                }
+            }
+
+            items(activityReviews, key = { it.review_id }) { r ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Column(
+                                modifier =
+                                    Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenMovieFromContentId(r.content_id) },
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = "User …${r.user_id.takeLast(6)} · Movie ${r.content_id}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = r.review_text,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 6,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            ReviewLikeRow(
+                                review = r,
+                                currentUid = uid,
+                                likeRepo = likeRepo,
+                                likedReviewIds = likedReviewIds,
+                                onLikedIdsChange = { likedReviewIds = it },
+                                busyReviewId = likeBusyReviewId,
+                                onBusyChange = { likeBusyReviewId = it },
+                                onError = { msg -> feedError = msg },
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (followingIds.isNotEmpty() && activityReviews.isEmpty()) {
+                item {
+                    Text(
+                        "No reviews from people you follow yet.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsScreen(
+    analyticsRepo: AnalyticsRepository,
+    tmdbApiKey: String,
+    onBack: () -> Unit,
+) {
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    var stats by remember { mutableStateOf<UserAnalytics?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableStateOf(0) }
+
+    LaunchedEffect(uid, tmdbApiKey, refreshKey) {
+        if (uid.isNullOrBlank()) {
+            loading = false
+            stats = null
+            loadError = "Sign in to see your analytics."
+            return@LaunchedEffect
+        }
+        loading = true
+        loadError = null
+        try {
+            stats = analyticsRepo.loadUserAnalytics(uid, tmdbApiKey)
+        } catch (e: Exception) {
+            loadError = e.message ?: "Could not load analytics."
+            stats = null
+        } finally {
+            loading = false
+        }
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) {
+                Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Back")
+            }
+            OutlinedButton(
+                onClick = { refreshKey++ },
+                enabled = !uid.isNullOrBlank() && !loading,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Refresh")
+            }
+        }
+        Text(
+            text = "Your stats",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text =
+                "Counts and averages are computed from Firestore when you open this screen " +
+                    "(derived data — not stored separately). Genre and watch time use TMDB for movies you marked watched.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (tmdbApiKey.isBlank()) {
+            Text(
+                "Add TMDB_API_KEY in local.properties to enable genre and estimated watch time.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+
+        if (!loadError.isNullOrBlank()) {
+            Text(loadError!!, color = MaterialTheme.colorScheme.error)
+        }
+
+        when {
+            loading -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            stats != null -> {
+                val s = stats!!
+                AnalyticsStatCard(
+                    label = "Titles on watchlist",
+                    value = "${s.watchlistCount}",
+                )
+                AnalyticsStatCard(
+                    label = "Titles marked watched",
+                    value = "${s.watchedTitlesCount}",
+                )
+                AnalyticsStatCard(
+                    label = "Reviews written",
+                    value = "${s.reviewsWritten}",
+                )
+                AnalyticsStatCard(
+                    label = "Average rating given",
+                    value =
+                        if (s.averageRatingGiven != null) {
+                            String.format("%.1f / 10", s.averageRatingGiven)
+                        } else {
+                            "—"
+                        },
+                )
+
+                AnalyticsStatCard(
+                    label = "Top genre (from watched titles)",
+                    value =
+                        if (!s.topGenreName.isNullOrBlank()) {
+                            "${s.topGenreName} (${s.topGenreScore})"
+                        } else {
+                            "—"
+                        },
+                )
+
+                AnalyticsStatCard(
+                    label = "Estimated watch time (TMDB runtimes)",
+                    value = formatWatchMinutes(s.estimatedWatchMinutes),
+                )
+
+                if (s.genreBreakdown.isNotEmpty()) {
+                    Text(
+                        text = "Genre mix (watched)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val topGenres = s.genreBreakdown.take(6)
+                        val maxG = topGenres.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+                        for ((name, count) in topGenres) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.width(120.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                LinearProgressIndicator(
+                                    progress = { count.toFloat() / maxG },
+                                    modifier =
+                                        Modifier
+                                            .weight(1f)
+                                            .height(8.dp),
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                                Text(
+                                    text = "$count",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.width(28.dp),
+                                    textAlign = TextAlign.End,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (s.reviewsWritten > 0 && s.ratingsHistogram.isNotEmpty()) {
+                    Text(
+                        text = "Rating spread (your reviews)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    val maxCount = s.ratingsHistogram.values.maxOrNull()?.coerceAtLeast(1) ?: 1
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (rating in 0..10) {
+                            val count = s.ratingsHistogram[rating] ?: 0
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "$rating",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.width(22.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                LinearProgressIndicator(
+                                    progress = { count.toFloat() / maxCount },
+                                    modifier =
+                                        Modifier
+                                            .weight(1f)
+                                            .height(10.dp),
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = "$count",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.width(28.dp),
+                                    textAlign = TextAlign.End,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsStatCard(
+    label: String,
+    value: String,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+private fun formatWatchMinutes(minutes: Int): String {
+    if (minutes <= 0) return "—"
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h > 0 && m > 0 -> "${h}h ${m}m (~$minutes min)"
+        h > 0 -> "${h}h (~$minutes min)"
+        else -> "${m}m"
+    }
+}
+
+@Composable
 private fun WatchlistScreen(
     savedRepo: SavedMovieRepository,
     onBack: () -> Unit,
@@ -1724,6 +2503,7 @@ private fun WatchlistScreen(
 private fun ProfileScreen(
     viewModel: AuthViewModel = viewModel(),
     onBack: () -> Unit,
+    onOpenAnalytics: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val profile = state.profile
@@ -1757,6 +2537,22 @@ private fun ProfileScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
         )
+
+        OutlinedButton(
+            onClick = onOpenAnalytics,
+            enabled = !state.isBusy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors =
+                ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
+        ) {
+            Icon(imageVector = Icons.Filled.Star, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text("Your stats & analytics")
+        }
 
         val photoModel = pickedImage ?: profile?.profilePictureUrl
         Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {

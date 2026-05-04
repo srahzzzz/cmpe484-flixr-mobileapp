@@ -40,6 +40,28 @@ class FollowRepository(
     suspend fun isFollowing(followerId: String, followingId: String): Boolean =
         db.collection("Followers").document(edgeId(followerId, followingId)).get().await().exists()
 
+    /** How many accounts follow [userId] (capped by query limit for profile display). */
+    suspend fun countFollowers(userId: String): Int {
+        val snap =
+            db.collection("Followers")
+                .whereEqualTo("following_id", userId)
+                .limit(500)
+                .get()
+                .await()
+        return snap.size()
+    }
+
+    /** Users who follow [userId] (capped). */
+    suspend fun getFollowerIds(userId: String): List<String> {
+        val snap =
+            db.collection("Followers")
+                .whereEqualTo("following_id", userId)
+                .limit(500)
+                .get()
+                .await()
+        return snap.documents.mapNotNull { it.getString("follower_id") }.distinct()
+    }
+
     /** Live list of user IDs this account follows (re-attaches when follow graph changes). */
     fun listenFollowingIds(followerId: String): Flow<List<String>> =
         callbackFlow {

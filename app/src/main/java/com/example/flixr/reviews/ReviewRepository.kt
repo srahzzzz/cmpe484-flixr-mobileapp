@@ -27,6 +27,21 @@ class ReviewRepository(
         db.collection("Reviews").document(reviewId).delete().await()
     }
 
+    suspend fun getReviewsForUser(userId: String): List<Review> {
+        val snap =
+            db.collection("Reviews")
+                .whereEqualTo("user_id", userId)
+                .limit(reviewsPerContentLimit)
+                .get()
+                .await()
+        return snap.documents
+            .mapNotNull { it.toObject(Review::class.java) }
+            .sortedWith(
+                compareByDescending<Review> { it.created_at }
+                    .thenByDescending { it.updated_at },
+            )
+    }
+
     suspend fun getReviewsForContent(contentId: String): List<Review> {
         val snap =
             db.collection("Reviews")

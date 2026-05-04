@@ -9,6 +9,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -209,6 +210,17 @@ class AuthRepository(
 
     suspend fun loginEmail(email: String, password: String) {
         auth.signInWithEmailAndPassword(email.trim(), password).await()
+    }
+
+    /** Sends Firebase password-reset email (no-op if user missing; still succeeds for privacy). */
+    suspend fun sendPasswordResetEmail(emailRaw: String) {
+        val email = emailRaw.trim()
+        require(email.isNotBlank()) { "Email is required." }
+        try {
+            auth.sendPasswordResetEmail(email).await()
+        } catch (_: FirebaseAuthInvalidUserException) {
+            // Do not reveal whether the account exists.
+        }
     }
 
     /**

@@ -99,6 +99,28 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun sendPasswordReset(email: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isBusy = true, errorMessage = null, successMessage = null) }
+            try {
+                repo.sendPasswordResetEmail(email)
+                _state.update {
+                    it.copy(
+                        isBusy = false,
+                        successMessage = "If an account exists for that email, a reset link was sent.",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isBusy = false,
+                        errorMessage = e.message ?: "Could not send reset email.",
+                    )
+                }
+            }
+        }
+    }
+
     fun signUpEmail(username: String, email: String, password: String) {
         viewModelScope.launch {
             _state.update { it.copy(isBusy = true, errorMessage = null, successMessage = null) }

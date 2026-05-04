@@ -35,4 +35,28 @@ class WatchHistoryRepository(
     suspend fun markWatched(uid: String, contentId: String) {
         recordWatchProgress(uid, contentId, watched = true, progressPercent = 100)
     }
+
+    /**
+     * TMDB movie ids the user marked watched, newest [updated_at] first.
+     * Uses the same query shape as analytics (filter `watched` on the client).
+     */
+    suspend fun listWatchedMovieIds(uid: String, limit: Long = 200L): List<Int> {
+        val snap =
+            db.collection("WatchHistory")
+                .whereEqualTo("user_id", uid)
+                .limit(limit)
+                .get()
+                .await()
+        return snap.documents
+            .mapNotNull { doc ->
+                if (doc.getBoolean("watched") != true) return@mapNotNull null
+                val cid = doc.getString("content_id") ?: return@mapNotNull null
+                val id = cid.toIntOrNull() ?: return@mapNotNull null
+                val ts = doc.getTimestamp("updated_at")?.toDate()?.time ?: 0L
+                id to ts
+            }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .distinct()
+    }
 }

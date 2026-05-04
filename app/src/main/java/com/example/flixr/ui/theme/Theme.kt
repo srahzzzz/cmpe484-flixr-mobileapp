@@ -11,6 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+@Composable
+fun flixrNavigationBarContainerColor(): Color =
+    MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+
 private val DarkColorScheme =
     darkColorScheme(
         primary = FlixrPrimaryDark,

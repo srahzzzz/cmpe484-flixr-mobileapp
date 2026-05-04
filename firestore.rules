@@ -1,7 +1,20 @@
 rules_version = '2';
 
-// Deploy: `firebase deploy --only firestore:rules` (requires Firebase CLI & project).
-// Tune for production: tighten `Reviews` reads, add Storage rules for profile pictures.
+// =============================================================================
+// FLIXR — Firestore security rules (match Android app collection names exactly)
+// =============================================================================
+//
+// Your Firebase Console currently uses OPEN rules (allow read, write: if true).
+// Replace them with this file, then deploy:
+//   firebase deploy --only firestore:rules
+//
+// Collection names in THIS app use PascalCase (not the lowercase tutorial style):
+//   users, usernames, Reviews, Watchlist, WatchHistory, Followers, Likes,
+//   EpisodeTracking, ReviewComments, DirectMessages
+//
+// There is NO Firestore "content" / TMDB cache collection — movie data comes from TMDB in the client.
+//
+// =============================================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -14,50 +27,75 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
-    // --- Profiles ---
+    // -------------------------------------------------------------------------
+    // users/{uid} — profile docs (AuthRepository, social UI, messaging)
+    // -------------------------------------------------------------------------
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update: if isOwner(userId);
       allow delete: if isOwner(userId);
     }
 
-    // Username locks: email signup reserves BEFORE auth exists (see app AuthRepository).
+    // -------------------------------------------------------------------------
+    // usernames/{normalizedUsername} — uniqueness lock for signup / Google onboarding
+    //
+    // IMPORTANT: Email signup runs a Firestore transaction BEFORE Firebase Auth exists.
+    // That transaction must READ/WRITE this path while request.auth == null.
+    // So: public read on individual docs, and create with __RESERVED__ without sign-in.
+    // -------------------------------------------------------------------------
     match /usernames/{name} {
-      allow read: if signedIn();
-      // Pre-auth reservation step uses uid "__RESERVED__".
+      allow read: if true;
       allow create: if
         (resource == null && request.resource.data.uid == '__RESERVED__') ||
         (signedIn() && request.resource.data.uid == request.auth.uid);
       allow update: if
         (signedIn() && resource.data.uid == '__RESERVED__' && request.resource.data.uid == request.auth.uid) ||
         (signedIn() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid);
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      // Owner delete, plus cleanup of pre-auth "__RESERVED__" rows when signup fails before auth exists.
+      // (Tighter production option: Cloud Function TTL cleanup instead of client delete on reserved rows.)
+      allow delete: if
+        (signedIn() && resource.data.uid == request.auth.uid) ||
+        (resource != null && resource.data.uid == '__RESERVED__');
     }
 
-    // --- Reviews (public read for movie pages; writes scoped) ---
+    // -------------------------------------------------------------------------
+    // Reviews/{reviewId} — movie/TV reviews (ReviewRepository, activity feed)
+    //
+    // - Signed-in users can read (tightens public internet-wide reads).
+    // - Create: author uid must match auth; review_id must match document id (app guarantees this).
+    // - Update: owner edits full doc OR any signed-in user changes ONLY likes_count (LikeRepository transaction).
+    // -------------------------------------------------------------------------
     match /Reviews/{reviewId} {
-      allow read: if true;
+      allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.user_id == request.auth.uid
         && request.resource.data.review_id == reviewId;
       allow delete: if signedIn() && resource.data.user_id == request.auth.uid;
-      // Owner edits full doc OR any signed-in user only bumps likes_count (see LikeRepository).
       allow update: if signedIn() && (
         resource.data.user_id == request.auth.uid ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes_count'])
       );
     }
 
+    // -------------------------------------------------------------------------
+    // Watchlist/{uid_movieId} — saved movies (SavedMovieRepository)
+    // -------------------------------------------------------------------------
     match /Watchlist/{docId} {
       allow read, delete: if signedIn() && resource.data.user_id == request.auth.uid;
       allow create, update: if signedIn() && request.resource.data.user_id == request.auth.uid;
     }
 
+    // -------------------------------------------------------------------------
+    // WatchHistory/{uid_contentId} — mark watched + progress (WatchHistoryRepository, analytics)
+    // -------------------------------------------------------------------------
     match /WatchHistory/{docId} {
       allow read, delete: if signedIn() && resource.data.user_id == request.auth.uid;
       allow create, update: if signedIn() && request.resource.data.user_id == request.auth.uid;
     }
 
+    // -------------------------------------------------------------------------
+    // Followers/{followerUid_followingUid} — directed follow edges (FollowRepository)
+    // -------------------------------------------------------------------------
     match /Followers/{docId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.follower_id == request.auth.uid;
@@ -65,6 +103,9 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // -------------------------------------------------------------------------
+    // Likes/{userId_reviewId} — like edges; toggled with Review.likes_count (LikeRepository)
+    // -------------------------------------------------------------------------
     match /Likes/{docId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.user_id == request.auth.uid;
@@ -72,6 +113,44 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // -------------------------------------------------------------------------
+    // EpisodeTracking/{uid_showId_season_episode} — per-episode watched flags
+    // -------------------------------------------------------------------------
+    match /EpisodeTracking/{docId} {
+      allow read, delete: if signedIn() && resource.data.user_id == request.auth.uid;
+      allow create, update: if signedIn() && request.resource.data.user_id == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // ReviewComments/{commentId} — comments under a review (ReviewCommentRepository)
+    // -------------------------------------------------------------------------
+    match /ReviewComments/{commentId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.comment_id == commentId;
+      allow delete: if signedIn() && resource.data.user_id == request.auth.uid;
+      allow update: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // DirectMessages/{messageId} — 1:1 chat messages (MessageRepository)
+    // -------------------------------------------------------------------------
+    match /DirectMessages/{messageId} {
+      allow read: if signedIn() && (
+        resource.data.sender_id == request.auth.uid ||
+        resource.data.recipient_id == request.auth.uid
+      );
+      allow create: if signedIn()
+        && request.resource.data.sender_id == request.auth.uid
+        && request.resource.data.recipient_id != request.auth.uid
+        && request.resource.data.message_id == messageId;
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Deny everything else (new collections stay locked until you add rules)
+    // -------------------------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
     }

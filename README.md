@@ -5,7 +5,6 @@ Android project | Kotlin + Jetpack Compose
 
 Flixr is a movie & TV tracking app I built for class. Basically it's like a small social layer on top of TMDB — you can browse films, save a watchlist, mark stuff as watched, write reviews, follow classmates, message people, track TV episodes, and make your own custom lists. All the account stuff and saved data goes through **Firebase** (Auth + Firestore + Storage for profile pics).
 
-Repo: https://github.com/srahzzzz/cmpe484-flixr-mobileapp
 
 ---
 
@@ -201,12 +200,11 @@ cd cmpe484-flixr-mobileapp
 
 ```properties
 sdk.dir=C\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
-TMDB_API_KEY=your_actual_key_here
+TMDB_API_KEY= x
 ```
 
 **Do not commit your real API key.** `local.properties` is gitignored.
 
-Without a key, movie search and shelves won't load properly.
 
 ### 4. Firebase
 
@@ -222,9 +220,6 @@ Without a key, movie search and shelves won't load properly.
 firebase deploy --only firestore:rules
 ```
 
-(You need Firebase CLI installed and logged in.)
-
-For Google Sign-In you also need the SHA-1 from your debug keystore in Firebase — Android Studio can show this under Gradle signing report, or look up "firebase android sha1" (everyone does this at least once).
 
 ### 5. Run on emulator or phone
 
@@ -317,6 +312,4 @@ Movie metadata itself is **not** stored in Firestore — it comes from TMDB each
 
 ## License / use
 
-This is a course project. Feel free to look at the code for learning, but don't copy-paste the whole thing for another class submission without checking your instructor's academic integrity rules.
-
-If something breaks when you build it, open an issue on GitHub or fix `local.properties` / `google-services.json` first — 90% of the time it's one of those two missing.
+This is a course project.

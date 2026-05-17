@@ -75,4 +75,16 @@ class EpisodeTrackingRepository(
             "${s}_$e"
         }.toSet()
     }
+
+    /** Mark or clear every episode in [episodes] as `(seasonNumber, episodeNumber)` pairs. */
+    suspend fun setAllEpisodesWatched(
+        uid: String,
+        showId: Int,
+        episodes: List<Pair<Int, Int>>,
+        watched: Boolean,
+    ) {
+        for ((season, episode) in episodes) {
+            setEpisodeWatched(uid, showId, season, episode, watched)
+        }
+    }
 }

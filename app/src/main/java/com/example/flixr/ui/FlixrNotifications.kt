@@ -45,6 +45,7 @@ fun NotificationsScreen(
     val uid = FirebaseAuth.getInstance().currentUser?.uid
     var items by remember { mutableStateOf<List<AppNotification>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(uid) {
@@ -53,8 +54,15 @@ fun NotificationsScreen(
             loading = false
             return@LaunchedEffect
         }
-        notificationRepo.listenNotifications(u).collect {
-            items = it
+        loadError = null
+        try {
+            notificationRepo.listenNotifications(u).collect {
+                items = it
+                loading = false
+            }
+        } catch (e: Exception) {
+            loadError = e.message ?: "Could not load notifications."
+            items = emptyList()
             loading = false
         }
     }
@@ -89,6 +97,10 @@ fun NotificationsScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
+                loadError != null ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(loadError!!, color = MaterialTheme.colorScheme.error)
+                    }
                 items.isEmpty() ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -120,17 +132,34 @@ fun NotificationsScreen(
                                         .fillMaxWidth()
                                         .clickable {
                                             scope.launch {
-                                                notificationRepo.markRead(n.notification_id)
+                                                try {
+                                                    if (n.notification_id.isNotBlank()) {
+                                                        notificationRepo.markRead(n.notification_id)
+                                                    }
+                                                } catch (_: Exception) {
+                                                }
                                                 when (n.type) {
-                                                    "follow", "unfollow" -> onOpenProfile(n.actor_id)
-                                                    "message" -> onOpenChat(n.actor_id)
+                                                    "follow", "unfollow" -> {
+                                                        if (n.actor_id.isNotBlank()) {
+                                                            onOpenProfile(n.actor_id)
+                                                        }
+                                                    }
+                                                    "message" -> {
+                                                        if (n.actor_id.isNotBlank()) {
+                                                            onOpenChat(n.actor_id)
+                                                        }
+                                                    }
                                                     "like" ->
                                                         if (n.content_id.isNotBlank()) {
                                                             onOpenMovie(n.content_id)
-                                                        } else {
+                                                        } else if (n.actor_id.isNotBlank()) {
                                                             onOpenProfile(n.actor_id)
                                                         }
-                                                    else -> onOpenProfile(n.actor_id)
+                                                    else -> {
+                                                        if (n.actor_id.isNotBlank()) {
+                                                            onOpenProfile(n.actor_id)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         },

@@ -57,7 +57,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.flixr.BuildConfig
 import com.example.flixr.auth.UserProfile
+import com.example.flixr.movies.TmdbClient
 import com.example.flixr.auth.Username
 import com.example.flixr.reviews.Review
 import com.example.flixr.reviews.ReviewRepository
@@ -90,7 +92,9 @@ fun UserProfileScreen(
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var profileTab by remember { mutableIntStateOf(0) }
+    var reviewMovieMeta by remember { mutableStateOf<Map<String, Pair<String, String?>>>(emptyMap()) }
     val scope = rememberCoroutineScope()
+    val apiKey = BuildConfig.TMDB_API_KEY.trim()
 
     fun reloadCountsAndFollowState() {
         scope.launch {
@@ -124,6 +128,25 @@ fun UserProfileScreen(
         } finally {
             loading = false
         }
+    }
+
+    LaunchedEffect(reviews, apiKey) {
+        if (apiKey.isBlank() || reviews.isEmpty()) {
+            reviewMovieMeta = emptyMap()
+            return@LaunchedEffect
+        }
+        val meta = mutableMapOf<String, Pair<String, String?>>()
+        for (r in reviews) {
+            val id = r.content_id.toIntOrNull() ?: continue
+            if (meta.containsKey(r.content_id)) continue
+            runCatching {
+                val m = TmdbClient.api.getMovieDetails(id, apiKey)
+                meta[r.content_id] = (m.title ?: "Movie $id") to m.posterPath
+            }.getOrElse {
+                meta[r.content_id] = "Movie $id" to null
+            }
+        }
+        reviewMovieMeta = meta
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -274,32 +297,13 @@ fun UserProfileScreen(
                                 Text("No reviews yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 reviews.forEach { r ->
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                        modifier =
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clickable { onOpenMovie(r.content_id) },
-                                    ) {
-                                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text(
-                                                "Movie ${r.content_id} · ${r.rating}/10",
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
-                                            Text(
-                                                r.review_text,
-                                                maxLines = 5,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                "Tap to open title · comments on movie page",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    }
+                                    val (title, poster) = reviewMovieMeta[r.content_id] ?: ("Movie ${r.content_id}" to null)
+                                    ReviewListCard(
+                                        review = r,
+                                        movieTitle = title,
+                                        posterPath = poster,
+                                        onClick = { onOpenMovie(r.content_id) },
+                                    )
                                 }
                             }
                         }
@@ -344,21 +348,18 @@ fun FollowingScreen(
         }
     }
 
+    Scaffold(
+        topBar = { FlixrSubScreenTopBar(title = "Following", onBack = onBack) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { padding ->
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .background(flixrMainSurfaceGradientBrush())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Back")
-        }
-        Text("Following", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
             "People you follow. Tap a name for their profile.",
             style = MaterialTheme.typography.bodySmall,
@@ -419,6 +420,7 @@ fun FollowingScreen(
                 }
         }
     }
+    }
 }
 
 @Composable
@@ -462,21 +464,18 @@ fun UserSearchScreen(
         }
     }
 
+    Scaffold(
+        topBar = { FlixrSubScreenTopBar(title = "Find users", onBack = onBack) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { padding ->
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .background(flixrMainSurfaceGradientBrush())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Back")
-        }
-        Text("Find users", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
             "Search by username (at least 2 characters).",
             style = MaterialTheme.typography.bodySmall,
@@ -565,6 +564,7 @@ fun UserSearchScreen(
                     }
                 }
         }
+    }
     }
 }
 

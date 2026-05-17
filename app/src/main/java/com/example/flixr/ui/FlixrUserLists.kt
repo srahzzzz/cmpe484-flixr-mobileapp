@@ -85,16 +85,13 @@ fun UserListsScreen(
 
     LaunchedEffect(uid) { reload() }
 
+    var listTemplate by remember { mutableStateOf("custom") }
+
     Scaffold(
         topBar = {
             FlixrSubScreenTopBar(
                 title = "My lists",
                 onBack = onBack,
-                actions = {
-                    IconButton(onClick = { showCreate = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "New list")
-                    }
-                },
             )
         },
     ) { padding ->
@@ -104,18 +101,19 @@ fun UserListsScreen(
                 .background(flixrMainSurfaceGradientBrush())
                 .padding(padding),
         ) {
+            Column(Modifier.fillMaxSize()) {
             when {
                 loading ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 lists.isEmpty() ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text("Create a list to organize films.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 else ->
                     LazyColumn(
-                        Modifier.fillMaxSize().padding(16.dp),
+                        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(lists, key = { it.list_id }) { list ->
@@ -155,6 +153,14 @@ fun UserListsScreen(
                         }
                     }
             }
+            Button(
+                onClick = { showCreate = true },
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text("Create new list")
+            }
+            }
         }
     }
 
@@ -163,13 +169,39 @@ fun UserListsScreen(
             onDismissRequest = { showCreate = false },
             title = { Text("New list") },
             text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("List name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Template", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            "watchlist" to "Watchlist",
+                            "favorites" to "Favorites",
+                            "ranked" to "Ranked",
+                            "custom" to "Custom",
+                        ).forEach { (id, label) ->
+                            androidx.compose.material3.FilterChip(
+                                selected = listTemplate == id,
+                                onClick = {
+                                    listTemplate = id
+                                    newName =
+                                        when (id) {
+                                            "watchlist" -> "Watchlist"
+                                            "favorites" -> "Favorites"
+                                            "ranked" -> "Ranked"
+                                            else -> newName
+                                        }
+                                },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("List name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             },
             confirmButton = {
                 Button(
@@ -201,11 +233,59 @@ fun UserListDetailScreen(
     listRepo: UserListRepository,
     movies: List<Movie>,
     onBack: () -> Unit,
+    onListUpdated: (UserList) -> Unit,
     onOpenMovie: (Movie) -> Unit,
 ) {
+    val showRanks = list.name.contains("ranked", ignoreCase = true)
+    var showRename by remember { mutableStateOf(false) }
+    var renameValue by remember(list.name) { mutableStateOf(list.name) }
+    val scope = rememberCoroutineScope()
+
+    if (showRename) {
+        AlertDialog(
+            onDismissRequest = { showRename = false },
+            title = { Text("Rename list") },
+            text = {
+                OutlinedTextField(
+                    value = renameValue,
+                    onValueChange = { renameValue = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("List name") },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            if (renameValue.isNotBlank()) {
+                                listRepo.renameList(list.list_id, renameValue.trim())
+                                onListUpdated(list.copy(name = renameValue.trim()))
+                                showRename = false
+                            }
+                        }
+                    },
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRename = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
-            FlixrSubScreenTopBar(title = list.name, onBack = onBack)
+            FlixrSubScreenTopBar(
+                title = list.name,
+                onBack = onBack,
+                actions = {
+                    TextButton(onClick = { showRename = true }) {
+                        Text("Rename")
+                    }
+                },
+            )
         },
     ) { padding ->
         if (movies.isEmpty()) {
@@ -230,7 +310,8 @@ fun UserListDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(movies, key = { it.id }) { movie ->
+                items(movies.size, key = { movies[it].id }) { index ->
+                    val movie = movies[index]
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         modifier =
@@ -238,17 +319,55 @@ fun UserListDetailScreen(
                                 .fillMaxWidth()
                                 .clickable { onOpenMovie(movie) },
                     ) {
-                        val url = listPosterUrl(movie.posterPath, width = 185)
-                        if (url != null) {
-                            AsyncImage(
-                                model = url,
-                                contentDescription = movie.title,
-                                modifier = Modifier.height(160.dp).fillMaxWidth(),
-                                contentScale = ContentScale.Crop,
-                            )
-                        } else {
-                            Box(Modifier.height(160.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text(movie.title, modifier = Modifier.padding(8.dp))
+                        Box {
+                            val url = listPosterUrl(movie.posterPath, width = 185)
+                            if (url != null) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = movie.title,
+                                    modifier = Modifier.height(160.dp).fillMaxWidth(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                Box(Modifier.height(160.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Text(movie.title, modifier = Modifier.padding(8.dp))
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        listRepo.removeMovieFromList(list.list_id, movie.id.toString())
+                                        onListUpdated(
+                                            list.copy(
+                                                movie_ids = list.movie_ids.filter { it != movie.id.toString() },
+                                            ),
+                                        )
+                                    }
+                                },
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "Remove from list",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            if (showRanks) {
+                                Surface(
+                                    modifier = Modifier.padding(8.dp).align(Alignment.TopStart),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                ) {
+                                    Text(
+                                        "#${index + 1}",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
                     }

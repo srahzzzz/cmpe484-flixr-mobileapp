@@ -36,14 +36,16 @@ fun List<Movie>.withLocalFilters(
     yearFrom: Int,
     yearTo: Int,
     minVote: Float,
+    requireReleaseYear: Boolean = false,
 ): List<Movie> {
     val yf = minOf(yearFrom, yearTo)
     val yt = maxOf(yearFrom, yearTo)
+    val yearFilterActive = yearFrom != 1990 || yearTo != 2026
     return filter { m ->
         val y = m.releaseDate?.take(4)?.toIntOrNull()
         val okYear =
             when {
-                y == null -> true
+                y == null -> !(requireReleaseYear || yearFilterActive)
                 y < yf -> false
                 y > yt -> false
                 else -> true
@@ -100,11 +102,29 @@ suspend fun loadBrowseTabResults(
     yearFrom: Int,
     yearTo: Int,
     minVote: Float,
+    shuffleSeed: Long? = null,
 ): List<Movie> {
     val q = query.trim()
     return if (q.isNotEmpty()) {
-        api.searchMovies(apiKey = apiKey, query = q).results.withLocalFilters(yearFrom, yearTo, minVote)
+        api.searchMovies(apiKey = apiKey, query = q).results
+            .withLocalFilters(yearFrom, yearTo, minVote, requireReleaseYear = true)
     } else {
-        discoverMoviesFiltered(api, apiKey, genreId, moodId, yearFrom, yearTo, minVote)
+        val page =
+            if (shuffleSeed != null) {
+                ((shuffleSeed % 10).toInt() + 1).coerceIn(1, 10)
+            } else {
+                1
+            }
+        discoverMoviesFiltered(
+            api,
+            apiKey,
+            genreId,
+            moodId,
+            yearFrom,
+            yearTo,
+            minVote,
+            page = page,
+            shuffleSeed = shuffleSeed,
+        )
     }
 }

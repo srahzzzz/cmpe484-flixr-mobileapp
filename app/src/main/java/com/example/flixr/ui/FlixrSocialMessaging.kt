@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -92,21 +93,18 @@ fun FollowersScreen(
         }
     }
 
+    Scaffold(
+        topBar = { FlixrSubScreenTopBar(title = "Followers", onBack = onBack) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { padding ->
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .background(flixrMainSurfaceGradientBrush())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Back")
-        }
-        Text("Followers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
             "People who follow you. Tap for profile.",
             style = MaterialTheme.typography.bodySmall,
@@ -185,6 +183,7 @@ fun FollowersScreen(
                 }
         }
     }
+    }
 }
 
 @Composable
@@ -219,21 +218,18 @@ fun MessagesHomeScreen(
         }
     }
 
+    Scaffold(
+        topBar = { FlixrSubScreenTopBar(title = "Messages", onBack = onBack) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { padding ->
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .background(flixrMainSurfaceGradientBrush())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Back")
-        }
-        Text("Messages", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
             "Chat with people you follow. Pick a name to open the thread.",
             style = MaterialTheme.typography.bodySmall,
@@ -260,7 +256,10 @@ fun MessagesHomeScreen(
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenProfile(peerId) },
                         ) {
                             Row(
                                 Modifier.padding(16.dp),
@@ -270,10 +269,7 @@ fun MessagesHomeScreen(
                                 Text(
                                     labels[peerId] ?: "@${peerId.take(8)}",
                                     fontWeight = FontWeight.SemiBold,
-                                    modifier =
-                                        Modifier
-                                            .weight(1f)
-                                            .clickable { onOpenProfile(peerId) },
+                                    modifier = Modifier.weight(1f),
                                 )
                                 TextButton(onClick = { onOpenChat(peerId) }) {
                                     Text("Chat")
@@ -283,6 +279,7 @@ fun MessagesHomeScreen(
                     }
                 }
         }
+    }
     }
 }
 
@@ -316,22 +313,18 @@ fun ChatScreen(
         }
     }
 
+    Scaffold(
+        topBar = { FlixrSubScreenTopBar(title = peerLabel, onBack = onBack) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { padding ->
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .background(flixrMainSurfaceGradientBrush())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text("Back")
-        }
-        Text(peerLabel, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -401,6 +394,7 @@ fun ChatScreen(
                 Icon(Icons.Filled.Send, contentDescription = "Send")
             }
         }
+    }
     }
 }
 

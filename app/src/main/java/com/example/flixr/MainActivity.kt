@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
                 }
             FlixrTheme(
                 darkTheme = darkTheme,
-                dynamicColor = themeMode == ThemeMode.SYSTEM,
+                dynamicColor = false,
             ) {
                 FlixrApp(themePreferences = themePreferences)
             }

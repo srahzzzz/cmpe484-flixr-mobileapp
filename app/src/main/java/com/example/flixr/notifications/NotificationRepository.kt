@@ -1,7 +1,6 @@
 package com.example.flixr.notifications
 
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -65,17 +64,17 @@ class NotificationRepository(
             val reg =
                 db.collection("Notifications")
                     .whereEqualTo("user_id", userId)
-                    .orderBy("created_at", Query.Direction.DESCENDING)
                     .limit(80)
                     .addSnapshotListener { snap, err ->
                         if (err != null) {
-                            close(err)
+                            trySend(emptyList())
                             return@addSnapshotListener
                         }
                         val list =
-                            snap?.documents?.map { doc ->
-                                AppNotification.fromMap(doc.data ?: emptyMap(), doc.id)
-                            }.orEmpty()
+                            snap?.documents
+                                ?.map { doc -> AppNotification.fromMap(doc.data ?: emptyMap(), doc.id) }
+                                .orEmpty()
+                                .sortedByDescending { it.created_at }
                         trySend(list)
                     }
             awaitClose { reg.remove() }

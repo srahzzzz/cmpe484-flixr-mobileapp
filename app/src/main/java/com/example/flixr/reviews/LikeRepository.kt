@@ -1,5 +1,6 @@
 package com.example.flixr.reviews
 
+import com.example.flixr.notifications.NotificationRepository
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -7,6 +8,7 @@ import kotlinx.coroutines.tasks.await
 
 class LikeRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    private val notificationRepo: NotificationRepository = NotificationRepository(),
 ) {
     private fun likeDocId(userId: String, reviewId: String) = "${userId}_${reviewId}"
 
@@ -55,6 +57,24 @@ class LikeRepository(
             }
             null
         }.await()
+
+        val likeSnap = db.collection("Likes").document(likeDocId(userId, reviewId)).get().await()
+        if (likeSnap.exists()) {
+            val reviewSnap = db.collection("Reviews").document(reviewId).get().await()
+            val ownerId = reviewSnap.getString("user_id").orEmpty()
+            val contentId = reviewSnap.getString("content_id").orEmpty()
+            if (ownerId.isNotBlank() && ownerId != userId) {
+                val actorName = notificationRepo.resolveActorUsername(userId)
+                notificationRepo.createNotification(
+                    recipientUserId = ownerId,
+                    type = "like",
+                    actorId = userId,
+                    actorUsername = actorName,
+                    referenceId = reviewId,
+                    contentId = contentId,
+                )
+            }
+        }
     }
 
     private fun readLikesCount(snap: DocumentSnapshot): Int {

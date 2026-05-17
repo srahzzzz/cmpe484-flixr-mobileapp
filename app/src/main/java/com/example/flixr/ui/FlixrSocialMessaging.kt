@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,12 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.flixr.messages.DirectMessage
 import com.example.flixr.messages.MessageRepository
 import com.example.flixr.reviews.ReviewComment
 import com.example.flixr.reviews.ReviewCommentRepository
 import com.example.flixr.social.FollowRepository
+import com.example.flixr.social.UserDiscoveryRepository
 import com.example.flixr.ui.theme.FlixrAccent
 import com.example.flixr.ui.theme.flixrMainSurfaceGradientBrush
 import com.google.firebase.auth.FirebaseAuth
@@ -56,14 +59,18 @@ import kotlinx.coroutines.tasks.await
 @Composable
 fun FollowersScreen(
     followRepo: FollowRepository,
+    discoveryRepo: UserDiscoveryRepository,
     onBack: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onMessage: (String) -> Unit,
 ) {
     val uid = FirebaseAuth.getInstance().currentUser?.uid
     var followerIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var labels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var err by remember { mutableStateOf<String?>(null) }
-    val db = remember { FirebaseFirestore.getInstance() }
+    var followingSet by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(uid) {
         val u = uid
@@ -76,13 +83,8 @@ fun FollowersScreen(
         err = null
         try {
             followerIds = followRepo.getFollowerIds(u)
-            val map = mutableMapOf<String, String>()
-            for (id in followerIds.take(100)) {
-                val snap = db.collection("users").document(id).get().await()
-                val un = snap.getString("username").orEmpty().ifBlank { id.take(8) }
-                map[id] = "@$un"
-            }
-            labels = map
+            labels = discoveryRepo.loadUsernameLabels(followerIds)
+            followingSet = followRepo.getFollowingIds(u).toSet()
         } catch (e: Exception) {
             err = e.message ?: "Could not load followers."
         } finally {
@@ -106,7 +108,7 @@ fun FollowersScreen(
         }
         Text("Followers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "People who follow you (from Firestore Followers).",
+            "People who follow you. Tap for profile.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -119,7 +121,7 @@ fun FollowersScreen(
             err != null -> Text(err!!, color = MaterialTheme.colorScheme.error)
             followerIds.isEmpty() ->
                 Text(
-                    "No followers yet. Share your username so others can follow you from Activity.",
+                    "No followers yet. Share your @username so classmates can find you under Find users.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             else ->
@@ -128,18 +130,55 @@ fun FollowersScreen(
                     modifier = Modifier.weight(1f),
                 ) {
                     items(followerIds, key = { it }) { id ->
+                        val alreadyFollowing = followingSet.contains(id)
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Column(Modifier.padding(14.dp)) {
-                                Text(labels[id] ?: "@${id.take(8)}", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "UID: $id",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenProfile(id) }
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(labels[id] ?: "@${id.take(8)}", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        id,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (!alreadyFollowing) {
+                                        TextButton(
+                                            onClick = {
+                                                val u = uid ?: return@TextButton
+                                                scope.launch {
+                                                    try {
+                                                        followRepo.follow(u, id)
+                                                        followingSet = followingSet + id
+                                                    } catch (e: Exception) {
+                                                        err = e.message
+                                                    }
+                                                }
+                                            },
+                                        ) {
+                                            Text("Follow back")
+                                        }
+                                    }
+                                    TextButton(
+                                        onClick = { onMessage(id) },
+                                        enabled = alreadyFollowing,
+                                    ) {
+                                        Text(if (alreadyFollowing) "Message" else "Follow first")
+                                    }
+                                }
                             }
                         }
                     }
@@ -151,16 +190,16 @@ fun FollowersScreen(
 @Composable
 fun MessagesHomeScreen(
     followRepo: FollowRepository,
+    discoveryRepo: UserDiscoveryRepository,
     onBack: () -> Unit,
     onOpenChat: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
 ) {
     val uid = FirebaseAuth.getInstance().currentUser?.uid
     var following by remember { mutableStateOf<List<String>>(emptyList()) }
     var labels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var err by remember { mutableStateOf<String?>(null) }
-    val db = remember { FirebaseFirestore.getInstance() }
-
     LaunchedEffect(uid) {
         val u = uid
         if (u.isNullOrBlank()) {
@@ -172,13 +211,7 @@ fun MessagesHomeScreen(
         err = null
         try {
             following = followRepo.getFollowingIds(u)
-            val map = mutableMapOf<String, String>()
-            for (id in following.take(100)) {
-                val snap = db.collection("users").document(id).get().await()
-                val un = snap.getString("username").orEmpty().ifBlank { id.take(8) }
-                map[id] = "@$un"
-            }
-            labels = map
+            labels = discoveryRepo.loadUsernameLabels(following)
         } catch (e: Exception) {
             err = e.message ?: "Could not load following list."
         } finally {
@@ -227,18 +260,24 @@ fun MessagesHomeScreen(
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenChat(peerId) },
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(
                                 Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(labels[peerId] ?: "@${peerId.take(8)}", fontWeight = FontWeight.SemiBold)
-                                Text("Open →", color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    labels[peerId] ?: "@${peerId.take(8)}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier =
+                                        Modifier
+                                            .weight(1f)
+                                            .clickable { onOpenProfile(peerId) },
+                                )
+                                TextButton(onClick = { onOpenChat(peerId) }) {
+                                    Text("Chat")
+                                }
                             }
                         }
                     }

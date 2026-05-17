@@ -1,5 +1,6 @@
 package com.example.flixr.messages
 
+import com.example.flixr.notifications.NotificationRepository
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.tasks.await
 
 class MessageRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    private val notificationRepo: NotificationRepository = NotificationRepository(),
 ) {
     companion object {
         fun chatRoomId(uidA: String, uidB: String): String =
@@ -49,6 +51,13 @@ class MessageRepository(
                 "created_at" to System.currentTimeMillis(),
             ),
         ).await()
+        notificationRepo.createNotification(
+            recipientUserId = recipientId,
+            type = "message",
+            actorId = senderId,
+            actorUsername = senderName,
+            referenceId = ref.id,
+        )
     }
 
     fun listenMessages(chatRoomId: String): Flow<List<DirectMessage>> =

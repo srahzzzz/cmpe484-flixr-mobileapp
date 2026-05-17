@@ -35,6 +35,31 @@ class EpisodeTrackingRepository(
         db.collection("EpisodeTracking").document(id).set(data, SetOptions.merge()).await()
     }
 
+    /** Distinct TMDB show ids the user has marked at least one episode for. */
+    suspend fun getTrackedShowIds(uid: String): List<Int> {
+        val snap =
+            db.collection("EpisodeTracking")
+                .whereEqualTo("user_id", uid)
+                .limit(500)
+                .get()
+                .await()
+        return snap.documents
+            .mapNotNull { it.getString("show_id")?.toIntOrNull() }
+            .distinct()
+    }
+
+    suspend fun setSeasonWatched(
+        uid: String,
+        showId: Int,
+        seasonNumber: Int,
+        episodeNumbers: List<Int>,
+        watched: Boolean,
+    ) {
+        for (ep in episodeNumbers) {
+            setEpisodeWatched(uid, showId, seasonNumber, ep, watched)
+        }
+    }
+
     suspend fun getWatchedEpisodeKeys(uid: String, showId: Int): Set<String> {
         val snap =
             db.collection("EpisodeTracking")

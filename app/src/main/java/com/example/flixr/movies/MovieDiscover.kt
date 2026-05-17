@@ -62,6 +62,8 @@ suspend fun discoverMoviesFiltered(
     yearFrom: Int,
     yearTo: Int,
     minVoteUser: Float,
+    page: Int = 1,
+    shuffleSeed: Long? = null,
 ): List<Movie> {
     val mood = MoodPresets.byId(moodId)
     val withGenres =
@@ -82,8 +84,11 @@ suspend fun discoverMoviesFiltered(
             primaryReleaseDateLte = lte,
             voteAverageGte = effectiveMinVote.takeIf { it > 0.05f },
             sortBy = "popularity.desc",
-            page = 1,
+            page = page.coerceIn(1, 10),
         ).results
+        .let { list ->
+            if (shuffleSeed != null) list.shuffled(java.util.Random(shuffleSeed)) else list
+        }
 }
 
 suspend fun loadBrowseTabResults(

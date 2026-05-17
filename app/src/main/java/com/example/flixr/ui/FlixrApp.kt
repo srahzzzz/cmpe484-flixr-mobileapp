@@ -45,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -116,6 +117,13 @@ import com.example.flixr.reviews.Review
 import com.example.flixr.reviews.ReviewCommentRepository
 import com.example.flixr.reviews.ReviewRepository
 import com.example.flixr.social.FollowRepository
+import com.example.flixr.social.UserDiscoveryRepository
+import com.example.flixr.notifications.NotificationRepository
+import com.example.flixr.lists.UserList
+import com.example.flixr.lists.UserListRepository
+import com.example.flixr.prefs.ThemeMode
+import com.example.flixr.prefs.ThemePreferences
+import kotlin.random.Random
 import com.example.flixr.stats.AnalyticsRepository
 import com.example.flixr.stats.UserAnalytics
 import com.google.firebase.auth.FirebaseAuth
@@ -169,7 +177,10 @@ import com.example.flixr.ui.theme.flixrNavigationBarContainerColor
  * 4) Email/password users get a profile written during signup, so they should land on Home.
  */
 @Composable
-fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
+fun FlixrApp(
+    viewModel: AuthViewModel = viewModel(),
+    themePreferences: ThemePreferences? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     // In-app splash (custom gradient + logo + "Flixr") for a FIXED duration.
@@ -179,13 +190,6 @@ fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
         delay(3000)
         showSplash = false
     }
-
-    // Activity Result API: Google account picker returns an Intent result to this launcher.
-    val googleLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            // `data` contains the account picker result for GoogleSignIn.
-            viewModel.onGoogleSignInResult(result.data)
-        }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (showSplash) {
@@ -200,14 +204,9 @@ fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
                     isBusy = state.isBusy,
                     errorMessage = state.errorMessage,
                     successMessage = state.successMessage,
-                    isGoogleConfigured = viewModel.isGoogleConfigured(),
                     onLoginEmail = viewModel::loginEmail,
                     onSignUpEmail = viewModel::signUpEmail,
                     onPasswordResetEmail = viewModel::sendPasswordReset,
-                    onGoogleClick = {
-                        // Launch Google account picker. Firebase sign-in happens in the ViewModel after result.
-                        googleLauncher.launch(viewModel.buildGoogleSignInIntent())
-                    },
                     onClearSuccess = viewModel::clearSuccess,
                 )
             }
@@ -230,6 +229,7 @@ fun FlixrApp(viewModel: AuthViewModel = viewModel()) {
                     email = state.profile?.email ?: state.firebaseUser?.email.orEmpty(),
                     isBusy = state.isBusy,
                     errorMessage = state.errorMessage,
+                    themePreferences = themePreferences,
                     onClearError = viewModel::clearError,
                     onSignOut = viewModel::signOut,
                 )
@@ -275,11 +275,9 @@ private fun AuthLandingScreen(
     isBusy: Boolean,
     errorMessage: String?,
     successMessage: String?,
-    isGoogleConfigured: Boolean,
     onLoginEmail: (email: String, password: String) -> Unit,
     onSignUpEmail: (username: String, email: String, password: String) -> Unit,
     onPasswordResetEmail: (email: String) -> Unit,
-    onGoogleClick: () -> Unit,
     onClearSuccess: () -> Unit,
 ) {
     // Local mini-navigation (keeps dependencies low for coursework).
@@ -320,9 +318,9 @@ private fun AuthLandingScreen(
             snackbar = { data ->
                 Snackbar(
                     snackbarData = data,
-                    containerColor = Color(0xFF2E7D32), // green
-                    contentColor = Color.White,
-                    actionColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    actionColor = MaterialTheme.colorScheme.primary,
                 )
             },
         )
@@ -409,37 +407,6 @@ private fun AuthLandingScreen(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         )
                     }
-
-                    Spacer(Modifier.height(14.dp))
-
-                    // Optional: Google button (kept here so Login screen matches screenshot exactly).
-                    OutlinedButton(
-                        onClick = onGoogleClick,
-                        enabled = !isBusy && isGoogleConfigured,
-                        modifier = Modifier.fillMaxWidth().height(54.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.9f)),
-                        colors =
-                            ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color.White,
-                                disabledContentColor = Color.White.copy(alpha = 0.5f),
-                            ),
-                    ) {
-                        Text(
-                            text = "Continue with Google",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        )
-                    }
-
-                    if (!isGoogleConfigured) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "Google Sign-In not configured yet (set default_web_client_id).",
-                            color = Color.White.copy(alpha = 0.7f),
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
                 }
             }
 
@@ -447,10 +414,8 @@ private fun AuthLandingScreen(
                 LoginScreen(
                     isBusy = isBusy,
                     errorMessage = errorMessage,
-                    isGoogleConfigured = isGoogleConfigured,
                     onBack = { screen = LandingScreen.Welcome },
                     onLoginEmail = onLoginEmail,
-                    onGoogleClick = onGoogleClick,
                     onForgotPassword = { screen = LandingScreen.ForgotPassword },
                 )
             }
@@ -483,10 +448,8 @@ private enum class LandingScreen { Welcome, Login, ForgotPassword, Signup }
 private fun LoginScreen(
     isBusy: Boolean,
     errorMessage: String?,
-    isGoogleConfigured: Boolean,
     onBack: () -> Unit,
     onLoginEmail: (email: String, password: String) -> Unit,
-    onGoogleClick: () -> Unit,
     onForgotPassword: () -> Unit,
 ) {
     var email by remember { mutableStateOf("") }
@@ -633,8 +596,6 @@ private fun LoginScreen(
                     color = Color.White,
                 )
             }
-
-            // Screenshot login screen doesn't show Google/back buttons; keep those on the Welcome screen.
         }
     }
 }
@@ -1120,11 +1081,13 @@ private fun HomeScreen(
     email: String,
     isBusy: Boolean,
     errorMessage: String?,
+    themePreferences: ThemePreferences?,
     onClearError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    var screen by remember { mutableStateOf("main") } // main|details|analytics|watchlist|watched|followers|messages|chat
+    var screen by remember { mutableStateOf("main") } // main|details|followers|following|messages|chat|profile|userSearch|notifications|lists|listDetail
     var chatPeerUid by remember { mutableStateOf<String?>(null) }
+    var profileUid by remember { mutableStateOf<String?>(null) }
     var detailsReturnTab by remember { mutableStateOf(0) }
     var mainTab by remember { mutableStateOf(0) } // 0 Home, 1 Discover, 2 Mood, 3 Activity, 4 Me
     var showTvSearch by remember { mutableStateOf(false) }
@@ -1155,12 +1118,18 @@ private fun HomeScreen(
     val reviewRepo = remember { ReviewRepository() }
     val likeRepo = remember { LikeRepository() }
     val followRepo = remember { FollowRepository() }
+    val discoveryRepo = remember { UserDiscoveryRepository() }
     val savedRepo = remember { SavedMovieRepository() }
     val watchHistoryRepo = remember { WatchHistoryRepository() }
     val analyticsRepo = remember { AnalyticsRepository() }
     val episodeRepo = remember { EpisodeTrackingRepository() }
     val reviewCommentRepo = remember { ReviewCommentRepository() }
     val messageRepo = remember { MessageRepository() }
+    val notificationRepo = remember { NotificationRepository() }
+    val userListRepo = remember { UserListRepository() }
+    var unreadNotifications by remember { mutableIntStateOf(0) }
+    var selectedUserList by remember { mutableStateOf<UserList?>(null) }
+    var trackedTvShows by remember { mutableStateOf<List<TvShowItem>>(emptyList()) }
 
     var followingIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var activityPreview by remember { mutableStateOf<List<Review>>(emptyList()) }
@@ -1179,6 +1148,29 @@ private fun HomeScreen(
             watchlistPreview = savedRepo.getWatchlistForUser(u).take(6)
         } catch (_: Exception) {
             watchlistPreview = emptyList()
+        }
+        notificationRepo.listenUnreadCount(u).collect { unreadNotifications = it }
+        val tmdbKey = BuildConfig.TMDB_API_KEY.trim()
+        if (tmdbKey.isNotBlank()) {
+            try {
+                val ids = episodeRepo.getTrackedShowIds(u)
+                trackedTvShows =
+                    ids.take(8).mapNotNull { id ->
+                        runCatching {
+                            TmdbClient.api.getTvDetails(id, tmdbKey).let { d ->
+                                TvShowItem(
+                                    id = d.id,
+                                    name = d.name,
+                                    posterPath = d.posterPath,
+                                    firstAirDate = d.firstAirDate,
+                                    overview = d.overview,
+                                )
+                            }
+                        }.getOrNull()
+                    }
+            } catch (_: Exception) {
+                trackedTvShows = emptyList()
+            }
         }
     }
 
@@ -1222,6 +1214,8 @@ private fun HomeScreen(
         if (apiKey.isBlank()) return@LaunchedEffect
         moodLoading = true
         try {
+            val page = Random.nextInt(1, 6)
+            val seed = System.currentTimeMillis() + moodRefresh
             moodMovies =
                 discoverMoviesFiltered(
                     api = TmdbClient.api,
@@ -1231,6 +1225,8 @@ private fun HomeScreen(
                     yearFrom = 1990,
                     yearTo = 2026,
                     minVoteUser = 0f,
+                    page = page,
+                    shuffleSeed = seed,
                 ).take(16)
         } catch (_: Exception) {
             moodMovies = emptyList()
@@ -1297,6 +1293,26 @@ private fun HomeScreen(
         }
     }
 
+    fun openProfile(uid: String) {
+        profileUid = uid
+        screen = "profile"
+    }
+
+    fun openMovieFromContentId(contentId: String, returnTab: Int) {
+        val mid = contentId.toIntOrNull() ?: 0
+        selected =
+            Movie(
+                id = mid,
+                title = "TMDB $mid",
+                posterPath = null,
+                releaseDate = null,
+                overview = null,
+                voteAverage = null,
+            )
+        detailsReturnTab = returnTab
+        screen = "details"
+    }
+
     val apiKeyTrimmed = BuildConfig.TMDB_API_KEY.trim()
     if (tvTrackingShow != null && apiKeyTrimmed.isNotBlank()) {
         TvShowTrackingScreen(
@@ -1316,9 +1332,107 @@ private fun HomeScreen(
             likeRepo = likeRepo,
             savedRepo = savedRepo,
             watchHistoryRepo = watchHistoryRepo,
+            userListRepo = userListRepo,
+            discoveryRepo = discoveryRepo,
             onBack = {
                 screen = "main"
                 mainTab = detailsReturnTab
+            },
+            onOpenProfile = { openProfile(it) },
+        )
+        return
+    }
+
+    if (screen == "profile" && profileUid != null) {
+        UserProfileScreen(
+            profileUid = profileUid!!,
+            followRepo = followRepo,
+            reviewRepo = reviewRepo,
+            discoveryRepo = discoveryRepo,
+            onBack = {
+                screen = "main"
+                mainTab = 4
+            },
+            onOpenMovie = { openMovieFromContentId(it, detailsReturnTab) },
+            onMessage = { peer ->
+                chatPeerUid = peer
+                screen = "chat"
+            },
+        )
+        return
+    }
+
+    if (screen == "following") {
+        FollowingScreen(
+            followRepo = followRepo,
+            discoveryRepo = discoveryRepo,
+            onBack = {
+                screen = "main"
+                mainTab = 4
+            },
+            onOpenProfile = { openProfile(it) },
+            onUnfollow = { fid ->
+                val u = uid
+                if (!u.isNullOrBlank()) {
+                    scope.launch {
+                        try {
+                            followRepo.unfollow(u, fid)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            },
+        )
+        return
+    }
+
+    if (screen == "userSearch") {
+        UserSearchScreen(
+            discoveryRepo = discoveryRepo,
+            followRepo = followRepo,
+            onBack = {
+                screen = "main"
+                mainTab = 4
+            },
+            onOpenProfile = { openProfile(it) },
+        )
+        return
+    }
+
+    if (screen == "notifications") {
+        NotificationsScreen(
+            notificationRepo = notificationRepo,
+            onBack = { screen = "main"; mainTab = 0 },
+            onOpenProfile = { openProfile(it) },
+            onOpenChat = { peer ->
+                chatPeerUid = peer
+                screen = "chat"
+            },
+            onOpenMovie = { openMovieFromContentId(it, 0) },
+        )
+        return
+    }
+
+    if (screen == "lists") {
+        UserListsScreen(
+            listRepo = userListRepo,
+            onBack = { screen = "main"; mainTab = 4 },
+            onOpenList = { list ->
+                selectedUserList = list
+                screen = "listDetail"
+            },
+        )
+        return
+    }
+
+    if (screen == "listDetail" && selectedUserList != null) {
+        UserListDetailRoute(
+            list = selectedUserList!!,
+            onBack = { screen = "lists" },
+            onOpenMovie = { movie ->
+                detailsReturnTab = 4
+                selected = movie
+                screen = "details"
             },
         )
         return
@@ -1327,9 +1441,15 @@ private fun HomeScreen(
     if (screen == "followers") {
         FollowersScreen(
             followRepo = followRepo,
+            discoveryRepo = discoveryRepo,
             onBack = {
                 screen = "main"
                 mainTab = 4
+            },
+            onOpenProfile = { openProfile(it) },
+            onMessage = { peer ->
+                chatPeerUid = peer
+                screen = "chat"
             },
         )
         return
@@ -1338,6 +1458,7 @@ private fun HomeScreen(
     if (screen == "messages") {
         MessagesHomeScreen(
             followRepo = followRepo,
+            discoveryRepo = discoveryRepo,
             onBack = {
                 screen = "main"
                 mainTab = 4
@@ -1346,6 +1467,7 @@ private fun HomeScreen(
                 chatPeerUid = peer
                 screen = "chat"
             },
+            onOpenProfile = { openProfile(it) },
         )
         return
     }
@@ -1457,6 +1579,8 @@ private fun HomeScreen(
                             HomeTabHeader(
                                 username = username,
                                 onSearch = { mainTab = 1 },
+                                unreadNotifications = unreadNotifications,
+                                onNotifications = { screen = "notifications" },
                             )
 
                         1 -> DiscoverTabHeader()
@@ -1490,30 +1614,21 @@ private fun HomeScreen(
                                     popularMovies = popularMovies,
                                     newReleases = newReleases,
                                     watchlistPreview = watchlistPreview,
+                                    trackedTvShows = trackedTvShows,
                                     isLoadingTrending = isLoadingTrending,
                                     activityPreview = activityPreview,
                                     followingCount = followingIds.size,
+                                    discoveryRepo = discoveryRepo,
+                                    onOpenTvShow = { tvTrackingShow = it },
                                     onMovieClick = { movie ->
                                         detailsReturnTab = 0
                                         selected = movie
                                         screen = "details"
                                     },
                                     onSeeAllActivity = { mainTab = 3 },
+                                    onOpenProfile = { openProfile(it) },
                                     onOpenActivityMovie = { contentId ->
-                                        val mid = contentId.toIntOrNull()
-                                        if (mid != null) {
-                                            selected =
-                                                Movie(
-                                                    id = mid,
-                                                    title = "TMDB $mid",
-                                                    posterPath = null,
-                                                    releaseDate = null,
-                                                    overview = null,
-                                                    voteAverage = null,
-                                                )
-                                            detailsReturnTab = 0
-                                            screen = "details"
-                                        }
+                                        openMovieFromContentId(contentId, 0)
                                     },
                                 )
                             }
@@ -1627,25 +1742,13 @@ private fun HomeScreen(
                         3 ->
                             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                 SocialFeedScreen(
-                                    followRepo = followRepo,
                                     reviewRepo = reviewRepo,
                                     likeRepo = likeRepo,
+                                    discoveryRepo = discoveryRepo,
+                                    followingIds = followingIds,
                                     embedded = true,
-                                    onBack = { },
-                                    onOpenMovieFromContentId = { contentId ->
-                                        val mid = contentId.toIntOrNull() ?: 0
-                                        selected =
-                                            Movie(
-                                                id = mid,
-                                                title = "TMDB $mid",
-                                                posterPath = null,
-                                                releaseDate = null,
-                                                overview = null,
-                                                voteAverage = null,
-                                            )
-                                        detailsReturnTab = 3
-                                        screen = "details"
-                                    },
+                                    onOpenMovieFromContentId = { openMovieFromContentId(it, 3) },
+                                    onOpenProfile = { openProfile(it) },
                                 )
                             }
 
@@ -1655,12 +1758,17 @@ private fun HomeScreen(
                                     authViewModel = authViewModel,
                                     reviewRepo = reviewRepo,
                                     followRepo = followRepo,
+                                    themePreferences = themePreferences,
                                     onWatchlist = { screen = "watchlist" },
                                     onWatchedHistory = { screen = "watched" },
                                     onFollowers = { screen = "followers" },
+                                    onFollowing = { screen = "following" },
                                     onMessages = { screen = "messages" },
+                                    onLists = { screen = "lists" },
                                     onAnalytics = { screen = "analytics" },
                                     onSocial = { mainTab = 3 },
+                                    onFindUsers = { screen = "userSearch" },
+                                    onOpenReviewMovie = { openMovieFromContentId(it, 4) },
                                     onTvShows = {
                                         if (apiKeyTrimmed.isBlank()) {
                                             localError = "TMDB API key missing."
@@ -1730,31 +1838,6 @@ private fun HomeScreen(
             }
         }
 
-        Box(
-            modifier =
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 22.dp, bottom = 92.dp)
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors =
-                                listOf(
-                                    Color(0xFF3B82F6),
-                                    FlixrAccent,
-                                ),
-                        ),
-                    )
-                    .clickable { mainTab = 1 },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "Discover",
-                tint = Color.White,
-            )
-        }
     }
 }
 
@@ -1762,6 +1845,8 @@ private fun HomeScreen(
 private fun HomeTabHeader(
     username: String,
     onSearch: () -> Unit,
+    unreadNotifications: Int = 0,
+    onNotifications: () -> Unit = {},
 ) {
     val first =
         username
@@ -1824,22 +1909,24 @@ private fun HomeTabHeader(
                 )
             }
             Box {
-                IconButton(onClick = { /* reserved */ }) {
+                IconButton(onClick = onNotifications) {
                     Icon(
                         imageVector = Icons.Filled.Notifications,
                         contentDescription = "Notifications",
                         tint = heroIcon,
                     )
                 }
-                Box(
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 4.dp, y = 4.dp)
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(FlixrLiveRed),
-                )
+                if (unreadNotifications > 0) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = 4.dp)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(FlixrLiveRed),
+                    )
+                }
             }
         }
     }
@@ -1942,18 +2029,63 @@ private fun SectionTitleBar(
 }
 
 @Composable
+private fun UserListDetailRoute(
+    list: UserList,
+    onBack: () -> Unit,
+    onOpenMovie: (Movie) -> Unit,
+) {
+    var movies by remember { mutableStateOf<List<Movie>>(emptyList()) }
+    LaunchedEffect(list.list_id, list.movie_ids) {
+        val key = BuildConfig.TMDB_API_KEY.trim()
+        movies =
+            list.movie_ids.mapNotNull { mid ->
+                val id = mid.toIntOrNull() ?: return@mapNotNull null
+                if (key.isBlank()) {
+                    Movie(id = id, title = "TMDB $id", posterPath = null, releaseDate = null, overview = null, voteAverage = null)
+                } else {
+                    runCatching {
+                        movieFromTmdbDetails(TmdbClient.api.getMovieDetails(id, key))
+                    }.getOrNull()
+                        ?: Movie(id = id, title = "TMDB $id", posterPath = null, releaseDate = null, overview = null, voteAverage = null)
+                }
+            }
+    }
+    UserListDetailScreen(
+        list = list,
+        listRepo = UserListRepository(),
+        movies = movies,
+        onBack = onBack,
+        onOpenMovie = onOpenMovie,
+    )
+}
+
+@Composable
 private fun HomeFeedTab(
     trendingMovies: List<Movie>,
     popularMovies: List<Movie>,
     newReleases: List<Movie>,
     watchlistPreview: List<Movie>,
+    trackedTvShows: List<TvShowItem>,
     isLoadingTrending: Boolean,
     activityPreview: List<Review>,
     followingCount: Int,
+    discoveryRepo: UserDiscoveryRepository,
     onMovieClick: (Movie) -> Unit,
     onSeeAllActivity: () -> Unit,
+    onOpenProfile: (String) -> Unit,
     onOpenActivityMovie: (String) -> Unit,
+    onOpenTvShow: (TvShowItem) -> Unit,
 ) {
+    var activityLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val authorIdsKey = activityPreview.map { it.user_id }.distinct().joinToString(",")
+    LaunchedEffect(authorIdsKey) {
+        activityLabels =
+            if (activityPreview.isEmpty()) {
+                emptyMap()
+            } else {
+                discoveryRepo.loadUsernameLabels(activityPreview.map { it.user_id })
+            }
+    }
     val continueWatching =
         remember(watchlistPreview, trendingMovies) {
             if (watchlistPreview.isNotEmpty()) {
@@ -2004,7 +2136,7 @@ private fun HomeFeedTab(
             Text(
                 text =
                     if (followingCount == 0) {
-                        "Follow people from Activity → Profile to fill this feed."
+                        "Follow people from Activity → Find users to fill this feed."
                     } else {
                         "Latest from people you follow · $followingCount"
                     },
@@ -2025,10 +2157,7 @@ private fun HomeFeedTab(
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = FlixrSurface.copy(alpha = 0.92f),
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenActivityMovie(r.content_id) },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
@@ -2037,6 +2166,10 @@ private fun HomeFeedTab(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenProfile(r.user_id) },
                         ) {
                             Box(
                                 modifier =
@@ -2047,7 +2180,11 @@ private fun HomeFeedTab(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    text = r.user_id.takeLast(1).uppercase(),
+                                    text =
+                                        usernameLabel(activityLabels, r.user_id)
+                                            .removePrefix("@")
+                                            .take(1)
+                                            .uppercase(),
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.labelLarge,
@@ -2055,30 +2192,47 @@ private fun HomeFeedTab(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Friend · film ${r.content_id}",
+                                    text = usernameLabel(activityLabels, r.user_id),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White,
                                 )
-                                TmdbRatingStars(voteAverage = r.rating.takeIf { it > 0 }?.toDouble())
+                                Text(
+                                    text = "Film ${r.content_id}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = FlixrMuted,
+                                )
                             }
                         }
-                        Text(
-                            text = "\"${r.review_text}\"",
-                            style =
-                                MaterialTheme.typography.bodyMedium.copy(
-                                    fontStyle = FontStyle.Italic,
-                                ),
-                            color = FlixrMuted,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenActivityMovie(r.content_id) },
+                        ) {
+                            TmdbRatingStars(voteAverage = r.rating.takeIf { it > 0 }?.toDouble())
                             Text(
-                                text = "${r.likes_count} likes",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "\"${r.review_text}\"",
+                                style =
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontStyle = FontStyle.Italic,
+                                    ),
                                 color = FlixrMuted,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
                             )
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Text(
+                                    text = "${r.likes_count} likes",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = FlixrMuted,
+                                )
+                                Text(
+                                    text = "View on movie →",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = FlixrAccent,
+                                )
+                            }
                         }
                     }
                 }
@@ -2087,6 +2241,50 @@ private fun HomeFeedTab(
         item {
             TextButton(onClick = onSeeAllActivity, modifier = Modifier.fillMaxWidth()) {
                 Text("See all activity →", color = FlixrAccent)
+            }
+        }
+
+        if (trackedTvShows.isNotEmpty()) {
+            item {
+                HomeSectionTitle(text = "Your TV")
+            }
+            item {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    items(trackedTvShows, key = { it.id }) { show ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            modifier =
+                                Modifier
+                                    .width(100.dp)
+                                    .clickable { onOpenTvShow(show) },
+                        ) {
+                            val url = tmdbPosterUrl(show.posterPath, width = 185)
+                            if (url != null) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = show.name,
+                                    modifier = Modifier.height(150.dp).fillMaxWidth(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                Box(
+                                    Modifier.height(150.dp).fillMaxWidth(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        show.name,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(6.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -2169,23 +2367,19 @@ private fun ContinueWatchingCard(
     progress: Float,
     onClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier =
             Modifier
-                .width(280.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(FlixrSurface)
-                .clickable(onClick = onClick)
-                .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+                .width(120.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .clickable(onClick = onClick),
     ) {
         Surface(
-            modifier = Modifier.size(width = 96.dp, height = 54.dp),
-            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.size(width = 120.dp, height = 180.dp),
+            shape = RoundedCornerShape(14.dp),
             color = FlixrSurfaceBright,
         ) {
-            val url = tmdbPosterUrl(movie.posterPath, width = 185)
+            val url = tmdbPosterUrl(movie.posterPath, width = 342)
             if (url != null) {
                 AsyncImage(
                     model = url,
@@ -2199,32 +2393,16 @@ private fun ContinueWatchingCard(
                 }
             }
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = movie.title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "Pick up where you left off",
-                style = MaterialTheme.typography.labelSmall,
-                color = FlixrMuted,
-            )
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { progress.coerceIn(0.05f, 1f) },
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(99.dp)),
-                color = FlixrAccent,
-                trackColor = Color.White.copy(alpha = 0.08f),
-            )
-        }
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0.05f, 1f) },
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(99.dp)),
+            color = FlixrAccent,
+            trackColor = Color.White.copy(alpha = 0.08f),
+        )
     }
 }
 
@@ -2429,8 +2607,13 @@ private fun BrowseMoviesTab(
     var filterSheetOpen by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val scroll = rememberScrollState()
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OutlinedTextField(
@@ -2483,6 +2666,48 @@ private fun BrowseMoviesTab(
                     ),
             ) {
                 Text("Clear")
+            }
+        }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (browseMoodId != null) {
+                item {
+                    val moodLabel = MoodPresets.byId(browseMoodId)?.label ?: browseMoodId
+                    FilterChip(
+                        selected = true,
+                        onClick = { onMoodChange(null) },
+                        label = { Text("Mood: $moodLabel ×") },
+                    )
+                }
+            }
+            if (browseGenreId != null) {
+                item {
+                    val genreLabel = genreFilters.firstOrNull { it.first == browseGenreId }?.second ?: browseGenreId
+                    FilterChip(
+                        selected = true,
+                        onClick = { onGenreChange(null) },
+                        label = { Text("Genre: $genreLabel ×") },
+                    )
+                }
+            }
+            item {
+                FilterChip(
+                    selected = browseYearFrom != 1990 || browseYearTo != 2026,
+                    onClick = { filterSheetOpen = true },
+                    label = { Text("Years: $browseYearFrom–$browseYearTo") },
+                )
+            }
+            if (browseMinRating > 0.05f) {
+                item {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onMinRatingChange(0f) },
+                        label = { Text("Min ★ ${String.format("%.1f", browseMinRating)} ×") },
+                    )
+                }
             }
         }
 
@@ -2539,7 +2764,12 @@ private fun BrowseMoviesTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = "Empty search uses discover with filters. Title search applies year & rating client-side.",
+            text =
+                if (query.trim().isNotBlank()) {
+                    "Title search: year & rating filters apply locally to results."
+                } else {
+                    "Empty search uses TMDB discover with your filters."
+                },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
         )
@@ -2568,7 +2798,11 @@ private fun BrowseMoviesTab(
                     )
                     Slider(
                         value = browseYearFrom.toFloat(),
-                        onValueChange = { onYearFromChange(it.toInt().coerceIn(1950, 2030)) },
+                        onValueChange = { v ->
+                            val y = v.toInt().coerceIn(1950, 2030)
+                            onYearFromChange(y)
+                            if (y > browseYearTo) onYearToChange(y)
+                        },
                         valueRange = 1950f..2030f,
                         steps = 79,
                     )
@@ -2578,10 +2812,26 @@ private fun BrowseMoviesTab(
                     )
                     Slider(
                         value = browseYearTo.toFloat(),
-                        onValueChange = { onYearToChange(it.toInt().coerceIn(1950, 2030)) },
+                        onValueChange = { v ->
+                            val y = v.toInt().coerceIn(1950, 2030)
+                            onYearToChange(y)
+                            if (y < browseYearFrom) onYearFromChange(y)
+                        },
                         valueRange = 1950f..2030f,
                         steps = 79,
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("All time" to (1950 to 2030), "2020s" to (2020 to 2026), "2010s" to (2010 to 2019)).forEach { (label, range) ->
+                            FilterChip(
+                                selected = browseYearFrom == range.first && browseYearTo == range.second,
+                                onClick = {
+                                    onYearFromChange(range.first)
+                                    onYearToChange(range.second)
+                                },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
                     Text(
                         "Minimum TMDB score (0–10)",
                         style = MaterialTheme.typography.labelLarge,
@@ -2931,7 +3181,12 @@ private fun TvShowTrackingScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             items(seasons, key = { it.seasonNumber }) { season ->
-                var expanded by remember(season.seasonNumber) { mutableStateOf(true) }
+                var expanded by remember(season.seasonNumber) { mutableStateOf(false) }
+                val seasonWatched =
+                    season.episodes.count { ep ->
+                        watchedKeys.contains("${season.seasonNumber}_${ep.episodeNumber}")
+                    }
+                val seasonTotal = season.episodes.size
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -2949,16 +3204,72 @@ private fun TvShowTrackingScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                text = season.name ?: "Season ${season.seasonNumber}",
-                                fontWeight = FontWeight.SemiBold,
-                                style = MaterialTheme.typography.titleSmall,
-                            )
+                            Column {
+                                Text(
+                                    text = season.name ?: "Season ${season.seasonNumber}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                if (seasonTotal > 0) {
+                                    Text(
+                                        "$seasonWatched / $seasonTotal episodes",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                             Text(
                                 if (expanded) "Hide" else "Show",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = FlixrAccent,
                             )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    val u = uid ?: return@TextButton
+                                    scope.launch {
+                                        try {
+                                            episodeRepo.setSeasonWatched(
+                                                u,
+                                                show.id,
+                                                season.seasonNumber,
+                                                season.episodes.map { it.episodeNumber },
+                                                true,
+                                            )
+                                            refreshWatched()
+                                        } catch (e: Exception) {
+                                            error = e.message
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text("Mark season watched")
+                            }
+                            TextButton(
+                                onClick = {
+                                    val u = uid ?: return@TextButton
+                                    scope.launch {
+                                        try {
+                                            episodeRepo.setSeasonWatched(
+                                                u,
+                                                show.id,
+                                                season.seasonNumber,
+                                                season.episodes.map { it.episodeNumber },
+                                                false,
+                                            )
+                                            refreshWatched()
+                                        } catch (e: Exception) {
+                                            error = e.message
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text("Clear season")
+                            }
                         }
                         if (expanded) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3055,7 +3366,7 @@ private fun MeDiscoverabilityTips() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Followers & messages: open Followers or Messages from the tiles below.",
+                text = "Social: Activity tab → Find users (@username) or Following list. View profiles from followers or the feed.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -3112,13 +3423,18 @@ private fun MeTab(
     authViewModel: AuthViewModel,
     reviewRepo: ReviewRepository,
     followRepo: FollowRepository,
+    themePreferences: ThemePreferences?,
     onWatchlist: () -> Unit,
     onWatchedHistory: () -> Unit,
     onFollowers: () -> Unit,
+    onFollowing: () -> Unit,
     onMessages: () -> Unit,
+    onLists: () -> Unit,
     onAnalytics: () -> Unit,
     onSocial: () -> Unit,
+    onFindUsers: () -> Unit,
     onTvShows: () -> Unit,
+    onOpenReviewMovie: (String) -> Unit,
     onSignOut: () -> Unit,
     isBusy: Boolean,
 ) {
@@ -3213,20 +3529,51 @@ private fun MeTab(
                     onClick = onFollowers,
                 )
                 MeQuickLinkTile(
+                    title = "Following",
+                    subtitle = "People you follow",
+                    icon = Icons.Filled.Person,
+                    modifier = Modifier.weight(1f),
+                    onClick = onFollowing,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MeQuickLinkTile(
                     title = "Messages",
                     subtitle = "Chat with following",
                     icon = Icons.Filled.Chat,
                     modifier = Modifier.weight(1f),
                     onClick = onMessages,
                 )
+                MeQuickLinkTile(
+                    title = "Find users",
+                    subtitle = "Search @username",
+                    icon = Icons.Filled.Search,
+                    modifier = Modifier.weight(1f),
+                    onClick = onFindUsers,
+                )
             }
-            MeQuickLinkTile(
-                title = "Following & activity",
-                subtitle = "Social feed · $followerCount followers (approx.)",
-                icon = Icons.Filled.Person,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onSocial,
-            )
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MeQuickLinkTile(
+                    title = "Lists",
+                    subtitle = "Custom collections",
+                    icon = Icons.Filled.List,
+                    modifier = Modifier.weight(1f),
+                    onClick = onLists,
+                )
+                MeQuickLinkTile(
+                    title = "Activity feed",
+                    subtitle = "Friends' reviews",
+                    icon = Icons.Filled.Home,
+                    modifier = Modifier.weight(1f),
+                    onClick = onSocial,
+                )
+            }
         }
 
         TabRow(
@@ -3243,6 +3590,7 @@ private fun MeTab(
             0 ->
                 ProfileScreen(
                     viewModel = authViewModel,
+                    themePreferences = themePreferences,
                     embedded = true,
                     onBack = {},
                     onOpenAnalytics = onAnalytics,
@@ -3258,16 +3606,25 @@ private fun MeTab(
                     } else {
                         for (r in myReviews) {
                             Surface(
-                                tonalElevation = 1.dp,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenReviewMovie(r.content_id) },
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
                                     Text(
                                         "Movie ${r.content_id} · ${r.rating}/10",
                                         fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
                                     )
                                     Text(r.review_text, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "Tap to open movie",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }
@@ -3363,11 +3720,15 @@ private fun MovieDetailsScreen(
     likeRepo: LikeRepository,
     savedRepo: SavedMovieRepository,
     watchHistoryRepo: WatchHistoryRepository,
+    userListRepo: UserListRepository,
+    discoveryRepo: UserDiscoveryRepository,
     onBack: () -> Unit,
+    onOpenProfile: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val currentUid = FirebaseAuth.getInstance().currentUser?.uid
+    var showAddToList by remember { mutableStateOf(false) }
 
     var ratingText by remember { mutableStateOf("5") }
     var reviewText by remember { mutableStateOf("") }
@@ -3382,6 +3743,7 @@ private fun MovieDetailsScreen(
 
     var likedReviewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var likeBusyReviewId by remember { mutableStateOf<String?>(null) }
+    var authorLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     var displayMovie by remember(movie.id) { mutableStateOf(movie) }
     LaunchedEffect(movie.id) {
@@ -3397,6 +3759,13 @@ private fun MovieDetailsScreen(
         } catch (_: Exception) {
             displayMovie = movie
         }
+    }
+
+    val reviewAuthorKey = reviews.map { it.user_id }.distinct().joinToString(",")
+    LaunchedEffect(reviewAuthorKey) {
+        authorLabels =
+            if (reviews.isEmpty()) emptyMap()
+            else discoveryRepo.loadUsernameLabels(reviews.map { it.user_id })
     }
 
     val reviewIdsKey = reviews.joinToString(",") { it.review_id }
@@ -3555,6 +3924,13 @@ private fun MovieDetailsScreen(
             }
 
             OutlinedButton(
+                onClick = { showAddToList = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Add to list")
+            }
+
+            OutlinedButton(
                 onClick = {
                     val uid = FirebaseAuth.getInstance().currentUser?.uid
                     if (uid.isNullOrBlank()) {
@@ -3589,6 +3965,15 @@ private fun MovieDetailsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
             Text("Write a review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
 
             OutlinedTextField(
@@ -3671,6 +4056,8 @@ private fun MovieDetailsScreen(
                     },
                 )
             }
+                }
+            }
 
             if (!error.isNullOrBlank()) {
                 Text(error!!, color = MaterialTheme.colorScheme.error)
@@ -3684,7 +4071,11 @@ private fun MovieDetailsScreen(
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     for (r in reviews) {
-                        Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3700,6 +4091,13 @@ private fun MovieDetailsScreen(
                                                 "Your review",
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        } else if (r.user_id.isNotBlank()) {
+                                            Text(
+                                                text = usernameLabel(authorLabels, r.user_id),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.clickable { onOpenProfile(r.user_id) },
                                             )
                                         }
                                         Text("Rating: ${r.rating}/10", fontWeight = FontWeight.SemiBold)
@@ -3757,6 +4155,14 @@ private fun MovieDetailsScreen(
                 }
             }
         }
+    }
+
+    if (showAddToList) {
+        AddToListDialog(
+            listRepo = userListRepo,
+            movieId = movie.id.toString(),
+            onDismiss = { showAddToList = false },
+        )
     }
 }
 
@@ -3991,22 +4397,20 @@ private fun TmdbPosterLarge(movie: Movie) {
 
 @Composable
 private fun SocialFeedScreen(
-    followRepo: FollowRepository,
     reviewRepo: ReviewRepository,
     likeRepo: LikeRepository,
+    discoveryRepo: UserDiscoveryRepository,
+    followingIds: List<String>,
     embedded: Boolean = false,
-    onBack: () -> Unit,
     onOpenMovieFromContentId: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
 ) {
     val uid = FirebaseAuth.getInstance().currentUser?.uid
-    var followUidInput by remember { mutableStateOf("") }
-    var followingIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var activityLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var activityReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
     var feedError by remember { mutableStateOf<String?>(null) }
-    var socialBusy by remember { mutableStateOf(false) }
     var likedReviewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var likeBusyReviewId by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
 
     val activityIdsKey = activityReviews.joinToString(",") { it.review_id }
     LaunchedEffect(uid, activityIdsKey) {
@@ -4017,14 +4421,6 @@ private fun SocialFeedScreen(
         }
         likedReviewIds =
             likeRepo.filterLikedReviewIds(u, activityReviews.mapNotNull { it.review_id.takeIf { id -> id.isNotBlank() } })
-    }
-
-    LaunchedEffect(uid) {
-        if (uid.isNullOrBlank()) {
-            followingIds = emptyList()
-            return@LaunchedEffect
-        }
-        followRepo.listenFollowingIds(uid).collect { followingIds = it }
     }
 
     LaunchedEffect(followingIds) {
@@ -4039,6 +4435,13 @@ private fun SocialFeedScreen(
         }
     }
 
+    val activityAuthorKey = activityReviews.map { it.user_id }.distinct().joinToString(",")
+    LaunchedEffect(activityAuthorKey) {
+        activityLabels =
+            if (activityReviews.isEmpty()) emptyMap()
+            else discoveryRepo.loadUsernameLabels(activityReviews.map { it.user_id })
+    }
+
     Column(
         modifier =
             Modifier
@@ -4051,31 +4454,21 @@ private fun SocialFeedScreen(
                     },
                 ),
     ) {
-        if (!embedded) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Back")
-            }
-        }
         Text(
-            text = if (embedded) "Social" else "Following & activity",
+            text = "Activity",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
-        if (!embedded) {
-            Text(
-                text = "Follow classmates by Firebase UID. Your feed shows their reviews in real time.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Text(
-                text = "Follow friends by UID — reviews update live.",
-                style = MaterialTheme.typography.bodySmall,
-                color = FlixrMuted,
-            )
-        }
+        Text(
+            text =
+                if (followingIds.isEmpty()) {
+                    "Follow people from Me → Find users to see their reviews here."
+                } else {
+                    "Reviews from people you follow."
+                },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (embedded) FlixrMuted else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         if (!feedError.isNullOrBlank()) {
             Text(feedError!!, color = MaterialTheme.colorScheme.error)
@@ -4083,112 +4476,24 @@ private fun SocialFeedScreen(
 
         if (uid.isNullOrBlank()) {
             Text(
-                "Sign in to follow users and see the activity feed.",
+                "Sign in to see the activity feed.",
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )
             return@Column
         }
 
-        OutlinedTextField(
-            value = followUidInput,
-            onValueChange = { followUidInput = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("User ID to follow") },
-            shape = RoundedCornerShape(14.dp),
-            colors =
-                OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-                ),
-        )
-        Button(
-            onClick = {
-                val target = followUidInput.trim()
-                if (target.isBlank()) return@Button
-                scope.launch {
-                    socialBusy = true
-                    feedError = null
-                    try {
-                        followRepo.follow(uid, target)
-                        followUidInput = ""
-                    } catch (e: Exception) {
-                        feedError = e.message ?: "Could not follow."
-                    } finally {
-                        socialBusy = false
-                    }
-                }
-            },
-            enabled = followUidInput.isNotBlank() && !socialBusy,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-        ) {
-            Text(if (socialBusy) "Working..." else "Follow")
-        }
-
-        Text(
-            "People you follow",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 8.dp),
-        )
         if (followingIds.isEmpty()) {
             Text(
-                "You are not following anyone yet.",
+                "Your feed is empty. Use Me → Find users to follow classmates.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
-        Text(
-            "Activity",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 12.dp),
-        )
-
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(followingIds, key = { it }) { fid ->
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    tonalElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = fid,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    try {
-                                        followRepo.unfollow(uid, fid)
-                                    } catch (e: Exception) {
-                                        feedError = e.message
-                                    }
-                                }
-                            },
-                        ) {
-                            Text("Unfollow")
-                        }
-                    }
-                }
-            }
-
             items(activityReviews, key = { it.review_id }) { r ->
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -4205,22 +4510,27 @@ private fun SocialFeedScreen(
                             verticalAlignment = Alignment.Top,
                         ) {
                             Column(
-                                modifier =
-                                    Modifier
-                                        .weight(1f)
-                                        .clickable { onOpenMovieFromContentId(r.content_id) },
+                                modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 Text(
-                                    text = "User …${r.user_id.takeLast(6)} · Movie ${r.content_id}",
+                                    text = usernameLabel(activityLabels, r.user_id),
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.clickable { onOpenProfile(r.user_id) },
                                 )
                                 Text(
                                     text = r.review_text,
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 6,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.clickable { onOpenMovieFromContentId(r.content_id) },
+                                )
+                                Text(
+                                    text = "Movie ${r.content_id} · comments on title page →",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.clickable { onOpenMovieFromContentId(r.content_id) },
                                 )
                             }
                             ReviewLikeRow(
@@ -4765,12 +5075,20 @@ private fun WatchedHistoryScreen(
 @Composable
 private fun ProfileScreen(
     viewModel: AuthViewModel,
+    themePreferences: ThemePreferences? = null,
     embedded: Boolean = false,
     onBack: () -> Unit,
     onOpenAnalytics: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val profile = state.profile
+    val scope = rememberCoroutineScope()
+    var themeMode by remember { mutableStateOf(ThemeMode.SYSTEM) }
+
+    if (themePreferences != null) {
+        val mode by themePreferences.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
+        LaunchedEffect(mode) { themeMode = mode }
+    }
 
     var username by remember { mutableStateOf(profile?.username.orEmpty()) }
     var bio by remember { mutableStateOf(profile?.bio.orEmpty()) }
@@ -4808,6 +5126,27 @@ private fun ProfileScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
+
+            if (themePreferences != null) {
+                Text("Appearance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = themeMode == ThemeMode.SYSTEM,
+                        onClick = { scope.launch { themePreferences.setThemeMode(ThemeMode.SYSTEM) } },
+                        label = { Text("System") },
+                    )
+                    FilterChip(
+                        selected = themeMode == ThemeMode.LIGHT,
+                        onClick = { scope.launch { themePreferences.setThemeMode(ThemeMode.LIGHT) } },
+                        label = { Text("Light") },
+                    )
+                    FilterChip(
+                        selected = themeMode == ThemeMode.DARK,
+                        onClick = { scope.launch { themePreferences.setThemeMode(ThemeMode.DARK) } },
+                        label = { Text("Dark") },
+                    )
+                }
+            }
 
             OutlinedButton(
                 onClick = onOpenAnalytics,

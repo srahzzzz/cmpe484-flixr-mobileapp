@@ -10,7 +10,7 @@ rules_version = '2';
 //
 // Collection names in THIS app use PascalCase (not the lowercase tutorial style):
 //   users, usernames, Reviews, Watchlist, WatchHistory, Followers, Likes,
-//   EpisodeTracking, ReviewComments, DirectMessages
+//   EpisodeTracking, ReviewComments, DirectMessages, Notifications, UserLists
 //
 // There is NO Firestore "content" / TMDB cache collection — movie data comes from TMDB in the client.
 //
@@ -25,6 +25,13 @@ service cloud.firestore {
 
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
+    }
+
+    function isFollowingUser(targetUid) {
+      return signedIn()
+        && targetUid is string
+        && targetUid != ''
+        && exists(/databases/$(database)/documents/Followers/$(request.auth.uid + '_' + targetUid));
     }
 
     // -------------------------------------------------------------------------
@@ -144,8 +151,29 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.sender_id == request.auth.uid
         && request.resource.data.recipient_id != request.auth.uid
-        && request.resource.data.message_id == messageId;
+        && request.resource.data.message_id == messageId
+        && isFollowingUser(request.resource.data.recipient_id);
       allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Notifications/{notificationId} — in-app alerts (NotificationRepository)
+    // -------------------------------------------------------------------------
+    match /Notifications/{notificationId} {
+      allow read, update: if signedIn() && resource.data.user_id == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.actor_id == request.auth.uid
+        && request.resource.data.user_id != request.auth.uid
+        && request.resource.data.notification_id == notificationId;
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // UserLists/{listId} — custom movie lists (UserListRepository)
+    // -------------------------------------------------------------------------
+    match /UserLists/{listId} {
+      allow read, delete: if signedIn() && resource.data.user_id == request.auth.uid;
+      allow create, update: if signedIn() && request.resource.data.user_id == request.auth.uid;
     }
 
     // -------------------------------------------------------------------------

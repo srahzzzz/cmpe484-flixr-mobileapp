@@ -3,7 +3,7 @@
 **CMPE 484 — Mobile Application Development**  
 Android project | Kotlin + Jetpack Compose
 
-Flixr is a movie & TV tracking app I built for class. Basically it's like a small social layer on top of TMDB — you can browse films, save a watchlist, mark stuff as watched, write reviews, follow classmates, message people, track TV episodes, and make your own custom lists. All the account stuff and saved data goes through **Firebase** (Auth + Firestore + Storage for profile pics).
+Flixr is a movie & TV tracking app I built for class. Basically it's like a small social layer on top of TMDB you can browse films, save a watchlist, mark stuff as watched, write reviews, follow classmates, message people, track TV episodes, and make your own custom lists. All the account stuff and saved data goes through **Firebase** (Auth + Firestore + Storage for profile pics).
 
 
 ---
